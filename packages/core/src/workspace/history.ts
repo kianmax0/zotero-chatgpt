@@ -58,15 +58,6 @@ export function isHistoryReport(value: unknown): value is HistoryMutationReport 
   if (new Set(source.changed).size !== source.changed.length || source.changed.length > source.requested) return false;
   return source.partial === (source.changed.length < source.requested);
 }
-export function parseHistoryListing(value: unknown): HistoryListing {
-  if (!isHistoryListing(value)) unavailable();
-  return value;
-}
-export function parseHistoryReport(value: unknown): HistoryMutationReport {
-  if (!isHistoryReport(value)) return unavailable();
-  return value;
-}
-
 export function historyCounts(entries: readonly HistoryEntry[]): { total: number; active: number; archived: number } {
   const archived = entries.filter(entry => !!entry.archivedAt).length;
   return { total: entries.length, active: entries.length - archived, archived };
