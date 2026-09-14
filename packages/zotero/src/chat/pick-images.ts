@@ -172,64 +172,6 @@ export function imageFromBytes(input: { id: string; name: string; bytes: Uint8Ar
   return { id: input.id, name, mime, dataUrl: `data:${mime};base64,${toBase64(input.bytes)}` };
 }
 
-export interface ImageFilePicker {
-  pickFiles(): Promise<Array<{ name: string; bytes: Uint8Array }>>;
-  uuid(): string;
-}
-
-export async function pickImageAttachments(host: ImageFilePicker): Promise<ImageAttachment[]> {
-  const files = await host.pickFiles();
-  const images: ImageAttachment[] = [];
-  for (const file of files) {
-    const image = imageFromBytes({ id: host.uuid(), name: file.name, bytes: file.bytes });
-    if (image) images.push(image);
-  }
-  return images;
-}
-
-interface GeckoFilePicker {
-  modeOpenMultiple: number;
-  returnOK: number;
-  init(window: Window, title: string, mode: number): void;
-  appendFilters?(filter: number): void;
-  appendFilter?(title: string, filter: string): void;
-  filterImages?: number;
-  show(): Promise<number> | number;
-  files?: string[] | { length: number; [index: number]: string };
-  file?: string;
-}
-
-declare const ChromeUtils: { importESModule?(uri: string): { FilePicker?: new () => GeckoFilePicker } };
-declare const IOUtils: { read?(path: string): Promise<Uint8Array> };
-
-async function pathsFromPicker(picker: GeckoFilePicker): Promise<string[]> {
-  const shown = await picker.show();
-  if (shown !== picker.returnOK) return [];
-  if (Array.isArray(picker.files)) return picker.files.filter(path => typeof path === 'string');
-  if (picker.files && typeof picker.files.length === 'number') {
-    return Array.from({ length: picker.files.length }, (_, index) => picker.files![index]).filter(path => typeof path === 'string');
-  }
-  return typeof picker.file === 'string' ? [picker.file] : [];
-}
-
-/** Zotero/Gecko file picker. Adapter-only: reads bytes and returns attachments. */
-export async function geckoPickImageFiles(win: Window): Promise<Array<{ name: string; bytes: Uint8Array }>> {
-  const FilePicker = ChromeUtils.importESModule?.('chrome://zotero/content/modules/filePicker.mjs')?.FilePicker;
-  if (!FilePicker || typeof IOUtils?.read !== 'function') return [];
-  const picker = new FilePicker();
-  picker.init(win, 'Attach image', picker.modeOpenMultiple);
-  if (typeof picker.appendFilters === 'function' && picker.filterImages !== undefined) picker.appendFilters(picker.filterImages);
-  else picker.appendFilter?.('Images', '*.png; *.jpg; *.jpeg; *.gif; *.webp');
-  const paths = await pathsFromPicker(picker);
-  const files: Array<{ name: string; bytes: Uint8Array }> = [];
-  for (const path of paths) {
-    const bytes = await IOUtils.read(path);
-    const name = path.split(/[/\\]/u).at(-1) || 'image';
-    files.push({ name, bytes });
-  }
-  return files;
-}
-
 interface GeckoClipboardService {
   kGlobalClipboard?: number;
   hasDataMatchingFlavors?(flavors: string[] | string, lengthOrWhich?: number, which?: number): boolean;
