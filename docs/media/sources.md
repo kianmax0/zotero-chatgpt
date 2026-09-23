@@ -3,7 +3,7 @@
 Short provenance for the images in the repository README. This is a record of what was actually
 produced, not a product specification.
 
-## Where it was made
+## Where the earlier Chat media was made
 
 - **Host**: Zotero 9.0.6 (`/Applications/Zotero.app`, version from its `Info.plist`), macOS, Apple
   Silicon, light theme.
@@ -72,6 +72,30 @@ entry, and the PDF was attached by hand in the isolated library.
   resource). `agent-workflow.png` is a 1600 px wide render of the same file made with
   `rsvg-convert`, kept in case a raster export is wanted; the README uses the SVG.
 
+## Library Agent acquisition stills (2026-09-23)
+
+- **Host and scope:** Zotero 9.0.6 on macOS Apple Silicon, in the dedicated
+  `.zotero-chatgpt-dev/context-runs/demo-final-20260923/{profile,data}` tree. The collection
+  named `Synthetic Agent demo` exists only there. No daily Zotero profile was opened or captured.
+- **Build:** `dist/zotero-chatgpt-0.1.1-dev.xpi`, SHA-256
+  `e0baff9f551ba7a195edb2b9a37c7ab6acdc2b85d169aa5664c4986496867726`, installed in
+  that profile for these final captures. Codex 0.156.1 is bundled, but no model turn was used for
+  the acquisition workflow shown here.
+- **`agent-library-entry.png`:** real Zotero main-library window with the Agent toolbar button
+  visible before a PDF or article was opened in the isolated collection.
+- **`agent-acquisition-review.png`:** a real unsaved task preview for public DOI
+  `10.1371/journal.pone.0345574`. The Zotero translator supplied the metadata; the task had not
+  received approval when captured.
+- **`agent-acquisition-result.png`:** the same task after explicit approval. The original Zotero
+  item and verified PDF attachment appeared in the isolated collection, and the task readback shows
+  one item saved and one PDF attached. The output button also selected the native Zotero item,
+  whose detail pane showed the DOI, target collection, and one attachment. Separately, DOI
+  `10.1038/nature14539` saved metadata in an earlier isolated test profile but reported no OA PDF
+  candidate; it is not shown as a successful PDF download.
+- **Capture:** unretouched window screenshots through the computer-use API at 1000×600 CSS px.
+  These are separate stills from the same product run, not a continuous screen recording. They do
+  not demonstrate a model-generated highlight or a general claim that every DOI has an OA PDF.
+
 ## Rebuilding
 
 The working scripts and the raw captures are intentionally outside version control, under
@@ -89,6 +113,8 @@ for these captures; they drive the isolated instance only and are not part of th
 
 ## Rights
 
-All media here is original work created for this repository and is covered by the repository's MIT
-licence. The paper, its metadata and its figures are synthetic. No third-party screenshot, logo, or
-user content is included. Nothing was uploaded to an external image host or compression service.
+All screenshots were captured here, and the drawn illustration and synthetic demo paper were made
+for this repository. The newer Agent stills show the Zotero interface and public DOI bibliographic
+metadata inside an isolated test library; this repository does not claim ownership of those third
+party elements. No user library content or third-party supplied screenshot is included. Nothing was
+uploaded to an external image host or compression service.

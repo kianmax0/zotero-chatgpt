@@ -1,9 +1,26 @@
 # zotero-chatgpt：进度、当前候选与证据索引
 
-> 文档类型：证据和缺口，不是产品规格。更新日期：2026-09-20。
-> 本版按 2026-09-20 发布前整备轮的实际检查重写。§1–§3 是当前候选、本轮实测结果与剩余阻塞；§4–§7 把 2026-09-19/20 的 UI 轮次和更早的 a33 记录压缩成证据索引，历史失败报告与原始版本归属保留。状态只用 PASS / FAIL / BLOCKED / NOT RUN。
+> 文档类型：证据和缺口，不是产品规格。更新日期：2026-09-23。
+> 下方新增本轮本地候选的实测记录。既有 §0–§7 保留 2026-09-20 及更早版本的发行、失败与验收归属，不自动继承到本轮。状态只用 PASS / FAIL / BLOCKED / NOT RUN。
 
 产品要求见 [zotero-chatgpt-user-flow.md](zotero-chatgpt-user-flow.md)，架构见 [module-design.md](module-design.md)，命令与状态定义见 [development.md](development.md)。
+
+## 2026-09-23 本地开发候选（尚未发行）
+
+基线是 GitHub `main` 的 `e951849`（`v0.1.1`）；本地先核对远端 SHA，再在 `codex/agent-library-and-context` 分支开发。manifest 仍为 `0.1.1`，所以本轮**只按内容 SHA 识别开发包**，不把旧发行版或较早的同版本 XPI 当作这次产物。没有公开 Release 或日常 profile 安装。
+
+| 层级 | 状态 | 本轮证据与范围 |
+| --- | --- | --- |
+| 源码/产品 | PASS | Chat 默认只组装冻结书目信息与摘要；首次说明无需侧栏确认，设置可关闭，显式选区独立。文献库工具栏与 Tools 菜单提供无 PDF 的 Agent 入口，受控 DOI 获取和选中条目整理共用原任务批准/账本。模型选择限 GPT-6 Sol、Astra、Luna；旧模型记录只读保留。 |
+| 运行资产 | PASS | 官方 Codex `rust-v0.156.1` arm64 archive `2bd64af1…11a5ca`、binary `0196e89f…255a`，哈希、Apple OpenAI 签名和 `runtime-prepare.mjs` 验证通过；旧 0.154.0 资产单独保存在忽略目录。官方 0.156.1 模型目录包含 Sol/Luna，实际账户可用性仍由运行时 live `model/list` 判定。 |
+| 本地门禁 | PASS | `npm run typecheck`、`npm run lint`、`npm run test:unit -- --maxWorkers=1`（106 files / **1408 tests** / 0 skipped）、`npm run package:dev`、`npm run verify:artifacts`。XPI `dist/zotero-chatgpt-0.1.1-dev.xpi`：99,554,194 bytes / 87 files，SHA-256 `e0baff9f551ba7a195edb2b9a37c7ab6acdc2b85d169aa5664c4986496867726`。完整单测在允许调用 `ps` 的环境执行；沙箱内同一类 build 测试曾因 `spawnSync ps EPERM` 失败，不是产品断言通过。 |
+| 真实 Zotero 无模型宿主 | PASS | Zotero 9.0.6、专用 `.zotero-chatgpt-dev/context-runs/final-e0ba-20260923/`、最终 XPI SHA `e0baff9f…`：`host-report.json` **49/49**。含主窗口无 Reader 可见/打开 Agent 入口、Reader/Chat 隔离、Agent 惰性启动、模式往返、PDF 原生读取、偏好挂载和性能检查；该阶段没有模型轮次。 |
+| 真实文献获取 | PASS | 最终 XPI 在专用 `.zotero-chatgpt-dev/context-runs/demo-final-20260923/` 的合成集合中，公开 DOI `10.1371/journal.pone.0345574`：Zotero translator 预览 → 明确批准 → 原生条目和 OA PDF 附件读回均观察到，输出按钮能定位 Zotero 条目。另一次隔离测试中，`10.1038/nature14539` 的元数据已保存但 OA PDF 候选不可用，`10.1371/journal.pone.0009619` 保存元数据但 PDF 身份无法确认，均未误报为附件成功。最终 XPI 的三张真实宿主 still 及来源见 [media/sources.md](media/sources.md)。获取任务无需 Codex 模型轮次。 |
+| Agent 真实 Sol/Luna 高亮与整理 | BLOCKED | 旧 0.154.0 运行时只列 Astra；升级至 0.156.1 后，当前专用 profile 的 live 模型目录仍只列 Astra。加了 Sol/Luna 强制门禁的 `--context --live --live-core-flows` 在 `sol-or-luna-model-unavailable` 以 **0 新模型轮次**停止。用户表示稍后会在专用 profile 亲自完成官方登录刷新；此前不把单测或旧 a30 的通过当成本轮真实高亮验收。文献库整理的新独立 turn 路径目前仅有确定性回归，真实模型仍 NOT RUN。 |
+| 意外的高成本模型轮次 | FAIL | 在强制门禁加入另一份 `context-driver.js` 前，一次专用 profile 运行沿用旧会话 Astra 设置，实际开始了 **1 次**高亮请求。发现后只停止自己启动、参数完全匹配的 Zotero/Codex 进程；第二轮未开始、原生写入未批准。报告在 `.zotero-chatgpt-dev/verification/agent-20260923/astra-run-interrupted.json` 保留为运行中断证据，不能写成通过或 0 请求。两份 live 驱动现都要求 Sol/Luna 并核对请求模型。 |
+| 真实 ChatGPT 网页回答与高亮录屏 | NOT RUN | 本轮验证了桥接契约及真实 Zotero UI；没有在最终 XPI 的官方网页对话里发送随机合成 PDF 问题，也没有用模型生成高亮录屏。README 的 Agent 获取 still 是真实受控获取流程，原有高亮图仍明确标为 illustration。 |
+
+宿主数据只来自专用 profile 和公开 DOI；没有写入日常 Zotero 文献库。原报告、版本和未完成项继续按下文历史段落保存。
 
 ## 0. 首个发行版 0.1.0（2026-09-20）
 
