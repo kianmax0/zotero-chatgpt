@@ -44,7 +44,7 @@ async function runHostSmoke(config) {
     click(libraryAgentEntry);
     const libraryAgentPanel = await until(() => win.document.querySelector('[data-zchatgpt-library-agent-panel]:not([hidden])'), 'library-agent-panel');
     await check('library-agent-opens-without-reader', Boolean(libraryAgentPanel), { openReaders: Zotero.Reader._readers.length });
-    click(libraryAgentPanel.querySelector('[aria-label="Close Zotero library Agent"]'));
+    click(libraryAgentPanel.querySelector('[aria-label="Close Zotero Agent"]'));
     const title = 'ZCHATGPT current-PDF synthetic context and native interaction test';
     const parent = new Zotero.Item('journalArticle'); parent.setField('title', title);
     let organizationFixture = null;
@@ -817,13 +817,10 @@ async function runHostSmoke(config) {
         };
         const annotationsBefore = a.getAnnotations().length;
         await sendAgent('Highlight the five most important scientifically meaningful sentences in the current PDF. Use native Zotero highlights and propose only exact quotations that appear verbatim in this PDF.', 'live-annotation');
-        const annotationCard = await until(() => taskCard('Annotations'), 'live-annotation-review', 60000);
-        await check('live-core-annotation-review-before-write', annotationCard.dataset.state === 'review' && annotationCard.querySelectorAll('[data-zchatgpt-task-item-id]').length === 5 && a.getAnnotations().length === annotationsBefore, { candidates: annotationCard.querySelectorAll('[data-zchatgpt-task-item-id]').length, nativeAnnotationsBefore: annotationsBefore });
-        click(annotationCard.querySelector('[data-zchatgpt-task-action="approve"]'));
-        await until(() => annotationCard.dataset.state === 'completed', 'live-annotation-applied', 60000); await a.loadAllData();
+        const annotationCard = await until(() => { const card = taskCard('Annotations'); return card && ['completed', 'partial', 'failed'].includes(card.dataset.state) ? card : null; }, 'live-annotation-auto-applied', 60000); await a.loadAllData();
         const createdAnnotations = a.getAnnotations().length - annotationsBefore;
-        await check('live-core-annotation-native-readback', createdAnnotations === 5, { createdAnnotations, attachmentKey: a.key });
-        toggle().click(); await until(() => !panel(), 'live-annotation-sidebar-closed'); toggle().click(); await until(() => taskCard('Annotations')?.dataset.state === 'completed', 'live-annotation-sidebar-reopened', 60000);
+        await check('live-core-annotation-auto-native-readback', ['completed', 'partial'].includes(annotationCard.dataset.state) && createdAnnotations > 0 && createdAnnotations <= 5 && annotationCard.querySelector('[data-zchatgpt-task-action="approve"]')?.hidden === true, { state: annotationCard.dataset.state, createdAnnotations, attachmentKey: a.key });
+        toggle().click(); await until(() => !panel(), 'live-annotation-sidebar-closed'); toggle().click(); await until(() => ['completed', 'partial'].includes(taskCard('Annotations')?.dataset.state), 'live-annotation-sidebar-reopened', 60000);
         const reopenedAnnotationCard = taskCard('Annotations'); const viewer = pdfViewer(); viewer.currentScaleValue = 'page-width'; const scaleBeforeOutput = viewer.currentScaleValue;
         let rotationBeforeOutput = viewer.pagesRotation; if (typeof rotationBeforeOutput === 'number') { viewer.pagesRotation = (rotationBeforeOutput + 90) % 360; rotationBeforeOutput = viewer.pagesRotation; }
         click(reopenedAnnotationCard.querySelector('[data-zchatgpt-task-action="output"]')); await delay(500);

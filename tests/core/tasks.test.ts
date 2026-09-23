@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest';
 import { NATIVE_ANNOTATION_PROVENANCE, NativeOperationError, type NativeActionPort, type NativeAnnotationSnapshot, type NativeAttachmentSnapshot, type NativeItemSnapshot, type NativeMetadata, type NativeOrganizationItemSnapshot } from '../../packages/contracts/src/native.ts';
 import { ActionTaskController } from '../../packages/core/src/tasks/controller.ts';
-import { parseAnnotationCandidates } from '../../packages/contracts/src/tasks.ts';
+import { parseAnnotationCandidates, validateAnnotationProposal } from '../../packages/contracts/src/tasks.ts';
 import { MemoryStorage, flush } from './doubles.ts';
 import { paperA } from '../contracts/factories.ts';
 const revision = { fingerprint: 'synthetic', size: 1024, modifiedAt: 1000 };
@@ -75,6 +75,11 @@ it('parses a bounded annotation proposal without accepting model-selected permis
   expect(parseAnnotationCandidates('{"candidates":[{"quote":"A definition","pageIndex":0}]}')).toEqual([{ quote: 'A definition', pageIndex: 0, reason: '' }]);
   for (const text of ['```json\n{"candidates":[]}\n```', '{"candidates":[],"approved":true}', '{"candidates":[{"quote":"A definition","pageIndex":0,"reason":"Definition","key":"HOSTILE1"}]}', '{"candidates":[{"quote":"A definition","pageIndex":0,"reason":7}]}']) expect(() => parseAnnotationCandidates(text)).toThrow();
 });
+it('keeps annotation proposal parsing byte-preserving so historical comments remain compatible', () => {
+  const parsed = parseAnnotationCandidates(JSON.stringify({ candidates: [{ quote: 'A definition', pageIndex: 0, reason: 'Explains the controlled comparison. [p. 350](https://zchatgpt.invalid/source/aaaaaaaa-bbbb-8ccc-addd-eeeeeeeeeeee/349) See https://example.org/method.' }] }));
+  expect(parsed[0]?.reason).toBe('Explains the controlled comparison. [p. 350](https://zchatgpt.invalid/source/aaaaaaaa-bbbb-8ccc-addd-eeeeeeeeeeee/349) See https://example.org/method.');
+  expect(validateAnnotationProposal({ quote: 'A definition', pageIndex: 0, reason: 'Legacy [p. 350](https://zchatgpt.invalid/source/aaaaaaaa-bbbb-8ccc-addd-eeeeeeeeeeee/349)' }).reason).toContain('zchatgpt.invalid');
+});
 it('carries a well-formed model annotation answer through parse, planning, approval and undo', async () => {
   const f = fixture();
   // The exact shape the annotate workflow asks the model to return, with the surrounding whitespace a
@@ -96,6 +101,43 @@ it('carries a well-formed model annotation answer through parse, planning, appro
   expect(applied.items.map(item => item.annotation?.comment)).toEqual([`${NATIVE_ANNOTATION_PROVENANCE}\nDefinition of a prior.`, `${NATIVE_ANNOTATION_PROVENANCE}\nDefinition of a likelihood.`]);
   const undone = await f.controller.undo(planned.id);
   expect(undone.state).toBe('undone'); expect(f.annotations.size).toBe(0);
+});
+it('auto-applies only uniquely resolved annotations through the approval ledger and keeps unresolved proposals visible', async () => {
+  const f = fixture();
+  const resolve = f.native.resolveQuote.bind(f.native);
+  f.native.resolveQuote = async input => input.quote === 'Ambiguous passage'
+    ? { status: 'ambiguous', matches: 2 }
+    : resolve(input);
+  const task = await f.controller.planAnnotations({
+    conversationId: 'conversation-a', paper: paperA, revision, question: 'Highlight useful passages.', autoApply: true,
+    candidates: [
+      { quote: 'Definition one', pageIndex: 0, reason: 'Useful definition. [p. 1](https://zchatgpt.invalid/source/aaaaaaaa-bbbb-8ccc-addd-eeeeeeeeeeee/0)' },
+      { quote: 'Ambiguous passage', pageIndex: 1, reason: 'Keep visible' },
+    ],
+  });
+  expect(task.kind).toBe('annotations');
+  if (task.kind !== 'annotations') throw new Error('The annotate task changed kind.');
+  expect(task.autoApply).toBe(true); expect(task.approvedAt).toBeTruthy(); expect(task.state).toBe('partial');
+  expect(task.items[0]).toMatchObject({ status: 'applied', selected: true, annotation: { comment: `${NATIVE_ANNOTATION_PROVENANCE}\nUseful definition.` } });
+  expect(task.items[1]).toMatchObject({ status: 'unresolved', selected: false, resolution: { status: 'ambiguous' } });
+  expect(f.creates()).toBe(1);
+  expect(await f.controller.undo(task.id)).toMatchObject({ state: 'undone' });
+  expect(f.annotations.size).toBe(0);
+});
+it('does not upgrade an existing manual annotation task into automatic writes', async () => {
+  const f = fixture();
+  const input = { conversationId: 'conversation-a', paper: paperA, revision, question: 'Mark the definition.', modelRequestId: 'model-request-a', candidates: [{ quote: 'Definition', pageIndex: 0, reason: 'Useful' }] };
+  const manual = await f.controller.planAnnotations(input);
+  await expect(f.controller.planAnnotations({ ...input, autoApply: true })).rejects.toMatchObject({ code: 'REQUEST_CONFLICT' });
+  expect(await f.controller.get(manual.id)).toEqual(manual);
+  expect(f.creates()).toBe(0);
+});
+it('marks auto-apply annotation tasks failed when no quote is uniquely resolvable and performs no writes', async () => {
+  const f = fixture();
+  f.native.resolveQuote = () => Promise.resolve({ status: 'unresolved', reason: 'not-found' });
+  const task = await f.controller.planAnnotations({ conversationId: 'conversation-a', paper: paperA, revision, question: 'Highlight these.', autoApply: true, candidates: [{ quote: 'Missing quote', pageIndex: 0, reason: 'Explain' }] });
+  expect(task).toMatchObject({ kind: 'annotations', state: 'failed', autoApply: true, items: [{ status: 'unresolved', resolution: { status: 'unresolved', reason: 'not-found' } }] });
+  expect(f.creates()).toBe(0);
 });
 it('persists candidate review and source validation without native writes before approval', async () => {
   const f = fixture(); const task = await f.plan();

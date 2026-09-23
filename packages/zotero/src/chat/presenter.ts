@@ -515,6 +515,27 @@ export class ConversationPresenter {
     if (draft === this.state.draft) return;
     this.draftVersion++; this.update({ draft, message: null }); this.stageDraft();
   }
+  /** Apply a committed Preferences snapshot to this live view without touching submitted requests. */
+  refreshWorkspaceSettings(settings: WorkspaceSettings): void {
+    if (this.disposed) return;
+    const workspace = clone(settings);
+    const models = this.state.runtime?.models ?? [];
+    const allowedIds = enforcedAllowedModelIds(workspace.allowedModels);
+    let draft = this.state.draft;
+    if (models.length && draft.settings) {
+      const aligned = alignSettings(models, draft.settings, allowedIds);
+      if (aligned.model !== draft.settings.model || aligned.serviceTier !== draft.settings.serviceTier || aligned.effort !== draft.settings.effort) {
+        draft = { ...draft, settings: aligned };
+      }
+    }
+    if (draft !== this.state.draft) {
+      this.draftVersion++;
+      this.update({ workspace, draft });
+      this.stageDraft();
+      return;
+    }
+    this.update({ workspace });
+  }
   private entryFromConversation(conversation: Conversation): HistoryEntry {
     return { id: conversation.id, paper: conversation.paper, title: conversation.title, identity: conversation.paperIdentity ?? { title: conversation.title, authors: [] }, createdAt: conversation.createdAt, updatedAt: conversation.updatedAt, messageCount: conversation.messages.length, preview: conversation.messages.at(-1)?.text ?? '', hasDraft: !!this.drafts.get(conversation.id)?.question.trim(), activeRequestId: conversation.activeRequestId, ...(conversation.archivedAt ? { archivedAt: conversation.archivedAt } : {}) };
   }
@@ -753,12 +774,22 @@ export class ConversationPresenter {
     try {
       const tasks = await this.getTasks();
       const kind = workflow === 'annotate' ? 'annotations' : 'organization';
-      if ((await tasks.list(conversation.id)).some(task => task.kind === kind && task.modelRequestId === requestId)) return;
+      const autoApply = user.workflow?.autoApplyAnnotations === true;
+      const existing = (await tasks.list(conversation.id)).find(task => task.kind === kind && task.modelRequestId === requestId);
+      if (existing) {
+        // A newly created auto-annotate task may have reached durable review just before shutdown.
+        // Resume only that explicitly marked task; historical review tasks remain manual.
+        if (existing.kind === 'annotations' && existing.autoApply && existing.state === 'review' && !existing.approvedAt) {
+          const selected = existing.items.filter(item => item.status === 'candidate' && item.resolution?.status === 'resolved').map(item => item.id);
+          if (selected.length) this.acceptTask(await tasks.approve(existing.id, selected));
+        }
+        return;
+      }
       if (workflow === 'annotate') {
         const origin = user.document ?? (user.batch ? conversation.messages.find(message => message.role === 'user' && message.batch?.id === user.batch?.id && message.document)?.document : undefined);
         if (!origin) throw new ReaderError('INVALID_REQUEST', 'Annotation proposals have no frozen PDF version. Prepare the PDF and try again.');
         const candidates = parseAnnotationCandidates(answer.text);
-        this.acceptTask(await tasks.planAnnotations({ conversationId: conversation.id, paper: clone(conversation.paper), revision: clone(origin.revision), question: user.batch?.question ?? user.text, candidates, modelRequestId: requestId }));
+        this.acceptTask(await tasks.planAnnotations({ conversationId: conversation.id, paper: clone(conversation.paper), revision: clone(origin.revision), question: user.batch?.question ?? user.text, candidates, modelRequestId: requestId, ...(autoApply ? { autoApply: true as const } : {}) }));
       } else {
         if (!user.organization) throw new ReaderError('INVALID_REQUEST', 'Organization proposals have no frozen Zotero selection. Select the items and try again.');
         const proposals = parseOrganizationProposals(answer.text);
@@ -1379,7 +1410,7 @@ export class ConversationPresenter {
     if (draft.skillId && (!skill || !skill.enabled)) throw new ReaderError('UNSUPPORTED_INTERACTION', 'The selected skill is unavailable or disabled.');
     if (inferredAnnotation && !skill) throw new ReaderError('UNSUPPORTED_INTERACTION', 'The built-in annotation workflow is unavailable or disabled. Enable it before asking Agent to highlight the current paper.');
     if (inferredOrganization && !skill) throw new ReaderError('UNSUPPORTED_INTERACTION', 'The built-in organization workflow is unavailable or disabled. Enable it before asking Agent to organize the selected items.');
-    return validateWorkflow({ skill: skill ?? null, profileId: profile ? draft.profileId : null, preferences: { ...settings.preferences, ...profile?.preferences, ...draft.overrides } });
+    return validateWorkflow({ skill: skill ?? null, profileId: profile ? draft.profileId : null, preferences: { ...settings.preferences, ...profile?.preferences, ...draft.overrides }, ...(mode === 'agent' && skill?.workflow === 'annotate' ? { autoApplyAnnotations: true } : {}) });
   }
   /**
    * Does this draft still point at a research profile that exists? When it does not, the dead

@@ -50,6 +50,17 @@ it('shows source-resolved annotation review and preserves checkbox state and foc
   await vi.waitFor(() => expect(actions.openSource).toHaveBeenCalledWith('task-one', 'one'));
 });
 
+it('shows automatic highlights as applying without another approval control', () => {
+  const { container, view, action } = setup(); const original = task();
+  if (original.kind !== 'annotations') throw new Error('Expected annotation task');
+  original.autoApply = true;
+  view.update({ tasks: [original] });
+  expect(container.querySelector('summary')?.textContent).toContain('Applying');
+  expect(action('approve').hidden).toBe(true);
+  expect(container.querySelector<HTMLElement>('[data-zchatgpt-task-item-id="one"] .zchatgpt-task-check')?.hidden).toBe(true);
+  expect(container.textContent).toContain('Defines the central variable');
+});
+
 it('requires explicit metadata and duplicate choices and sends the selected PDF preference', async () => {
   const { container, view, actions, change, action } = setup(); view.update({ tasks: [acquisition()] });
   expect(container.textContent).toContain('Research / Methods'); expect(action('approve').disabled).toBe(true);

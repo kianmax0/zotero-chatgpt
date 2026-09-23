@@ -20,6 +20,12 @@ export function validateAnnotationProposal(value: unknown): AnnotationProposal {
   // the whole batch. Extra keys remain rejected: the allowlist is what stops model-chosen write fields.
   return { quote: text(p.quote, 16000, 2), pageIndex: p.pageIndex as number, reason: p.reason === undefined ? '' : text(p.reason, 4000) };
 }
+/** Remove only Zotero ChatGPT's internal page citation links before a new comment is persisted. */
+export function cleanAnnotationReason(value: string): string {
+  const link = /\[[^\]]*\]\(https:\/\/zchatgpt\.invalid\/source\/[a-zA-Z0-9-]{1,128}\/\d+(?:\s+"[^"]*")?\)/giu;
+  const bareURL = /https:\/\/zchatgpt\.invalid\/source\/[a-zA-Z0-9-]{1,128}\/\d+/giu;
+  return value.replace(link, '').replace(bareURL, '').replace(/[\t ]{2,}/gu, ' ').replace(/\s+([,.;:!?])/gu, '$1').trim();
+}
 export function parseAnnotationCandidates(value: string): AnnotationProposal[] {
   text(value, 1024 * 1024, 2);
   let parsed: unknown; try { parsed = JSON.parse(value) as unknown; } catch { invalid(); }
@@ -140,10 +146,10 @@ interface ActionTaskBase {
   cancelRequested?: true;
 }
 export type ActionTaskRecord =
-  | (ActionTaskBase & { kind: 'annotations'; paper: PaperScope; documentRevision: DocumentRevision; modelRequestId?: string; items: AnnotationTaskItem[] })
+  | (ActionTaskBase & { kind: 'annotations'; paper: PaperScope; documentRevision: DocumentRevision; modelRequestId?: string; autoApply?: true; items: AnnotationTaskItem[] })
   | (ActionTaskBase & { kind: 'acquisition'; target: NativeCollectionTarget; items: AcquisitionTaskItem[] })
   | (ActionTaskBase & { kind: 'organization'; modelRequestId?: string; items: OrganizationTaskItem[] });
-export interface AnnotationTaskPlan { conversationId: string; paper: PaperScope; revision: DocumentRevision; question: string; modelRequestId?: string; candidates: AnnotationProposal[] }
+export interface AnnotationTaskPlan { conversationId: string; paper: PaperScope; revision: DocumentRevision; question: string; modelRequestId?: string; autoApply?: true; candidates: AnnotationProposal[] }
 export interface AcquisitionTaskPlan { conversationId: string; target: NativeCollectionTarget; question: string; identifiers: string[] }
 export interface OrganizationTaskPlan { conversationId: string; question: string; modelRequestId?: string; selection: NativeOrganizationItemSnapshot[]; collections: NativeCollectionTarget[]; proposals: OrganizationProposal[] }
 /** Durable action-task ledger surfaced to the UI; the implementation is `core/tasks`. */

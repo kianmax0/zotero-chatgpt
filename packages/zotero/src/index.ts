@@ -498,6 +498,11 @@ export function startup(options: PluginContext): void {
       // from another window's Preferences pane.
       for (const presenter of presenters.values()) presenter.setDocumentEnabled(value);
     },
+    // Preferences owns the durable write; push the committed snapshot into every already-open
+    // reader so its model picker and unsent draft agree without restarting Zotero.
+    settingsChanged: settings => {
+      for (const presenter of presenters.values()) presenter.refreshWorkspaceSettings(settings);
+    },
     // The runtime's last live `model/list` ids, or null when Agent has never loaded them. Read-only:
     // opening the Preferences window never starts Codex, and an offerable id it reports (a GPT-5.3
     // Spark model) becomes selectable in the pane. Excluded families are filtered in core, not here.

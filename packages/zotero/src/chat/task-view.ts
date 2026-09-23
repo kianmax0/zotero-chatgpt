@@ -148,8 +148,9 @@ export function mountTaskView(container: HTMLElement, actions: TaskViewActions):
         if (!selected.has(item.id)) selected.set(item.id, item.selected ?? true);
         if (task.state !== 'review' && item.selected !== undefined) selected.set(item.id, item.selected);
         if (item.kind === 'acquisition' && task.state !== 'review' && item.choice) choices.set(item.id, { ...item.choice });
-        const canReview = task.state === 'review' && !task.approvedAt && !mutating();
-        include.hidden = !['review', 'preparing'].includes(task.state); check.disabled = !canReview || !eligible(item); check.checked = eligible(item) ? !!selected.get(item.id) : !!item.selected;
+        const autoAnnotations = task.kind === 'annotations' && task.autoApply === true;
+        const canReview = task.state === 'review' && !task.approvedAt && !autoAnnotations && !mutating();
+        include.hidden = autoAnnotations || !['review', 'preparing'].includes(task.state); check.disabled = !canReview || !eligible(item); check.checked = eligible(item) ? !!selected.get(item.id) : !!item.selected;
         itemStatus.textContent = itemOutcome(item); itemError.textContent = item.errorCode ? `Error: ${item.errorCode}` : ''; itemError.hidden = !itemError.textContent;
         source.hidden = item.kind !== 'annotation' || item.resolution?.status !== 'resolved'; source.disabled = pending.has(`source:${item.id}`);
         output.hidden = !hasOutput(item); output.disabled = pending.has(`output:${item.id}`);
@@ -204,13 +205,14 @@ export function mountTaskView(container: HTMLElement, actions: TaskViewActions):
       const attachedPDFs = task.items.filter(item => item.kind === 'acquisition' && item.acquisition?.status === 'attached' && !item.attachmentUndone && item.status === 'applied').length;
       const done = task.items.filter(item => ['applied', 'metadata-only'].includes(item.status)).length;
       const verifiedOrganization = task.items.filter(item => item.kind === 'organization' && item.status === 'applied' && item.change).length;
-      const outcome = task.state === 'review' ? `${selectedItems.length}/${ready.length} selected${task.kind === 'organization' ? ' items' : ''}` : task.kind === 'annotations' ? `${done}/${task.items.length} annotations applied` : task.kind === 'organization' ? `${verifiedOrganization}/${task.items.length} items organized` : `${savedItems} ${savedItems === 1 ? 'item' : 'items'} saved · ${attachedPDFs} ${attachedPDFs === 1 ? 'PDF' : 'PDFs'} attached`;
+      const autoAnnotationReview = task.kind === 'annotations' && task.autoApply === true && task.state === 'review';
+      const outcome = autoAnnotationReview ? `${ready.length} verified passage${ready.length === 1 ? '' : 's'} · applying` : task.state === 'review' ? `${selectedItems.length}/${ready.length} selected${task.kind === 'organization' ? ' items' : ''}` : task.kind === 'annotations' ? `${done}/${task.items.length} annotations applied` : task.kind === 'organization' ? `${verifiedOrganization}/${task.items.length} items organized` : `${savedItems} ${savedItems === 1 ? 'item' : 'items'} saved · ${attachedPDFs} ${attachedPDFs === 1 ? 'PDF' : 'PDFs'} attached`;
       const taskName = task.kind === 'annotations' ? 'Annotations' : task.kind === 'organization' ? 'Organize library' : 'Acquire literature';
-      summary.textContent = `${taskName} · ${TASK_LABEL[task.state]} · ${outcome}`;
+      summary.textContent = `${taskName} · ${autoAnnotationReview ? 'Applying' : TASK_LABEL[task.state]} · ${outcome}`;
       const stateCounts = new Map<string, number>(); for (const item of task.items) { const label = item.kind === 'organization' ? itemOutcome(item) : ITEM_LABEL[item.status]; stateCounts.set(label, (stateCounts.get(label) ?? 0) + 1); }
       counts.textContent = [...stateCounts].map(([name, count]) => `${count} ${name.toLowerCase()}`).join(' · ');
       const uncertain = task.state === 'uncertain' || task.items.some(item => ['writing', 'uncertain', 'undoing'].includes(item.status));
-      approve.hidden = task.state !== 'review' || !!task.approvedAt; approve.disabled = mutating() || !selectedItems.length || !validChoices;
+      approve.hidden = task.state !== 'review' || !!task.approvedAt || (task.kind === 'annotations' && task.autoApply === true); approve.disabled = mutating() || !selectedItems.length || !validChoices;
       approve.textContent = pending.has('approve') ? 'Approving…' : 'Approve selected';
       cancel.hidden = !['preparing', 'review', 'running', 'uncertain'].includes(task.state); cancel.disabled = pending.has('cancel') || !!task.cancelRequested; cancel.textContent = task.cancelRequested || pending.has('cancel') ? 'Cancellation requested' : 'Cancel task';
       reconcile.hidden = !uncertain; reconcile.disabled = mutating();

@@ -266,7 +266,7 @@ function readingPort(conversationId: string) {
 function taskPort(conversationId: string) {
   const tasks: ActionTaskRecord[] = [];
   const base = () => ({ schemaVersion: 1 as const, id: 'aaaaaaaa-1111-4000-8000-000000000001', conversationId, question: '', state: 'review' as const, createdAt: 'now', updatedAt: 'now', revision: 1 });
-  const port: ActionTasks = { list: () => Promise.resolve(copy(tasks)), get: id => Promise.resolve(copy(tasks.find(task => task.id === id)!)), subscribe: () => () => {}, planAnnotations: vi.fn<ActionTasks['planAnnotations']>(input => { const task: ActionTaskRecord = { ...base(), question: input.question, kind: 'annotations', paper: input.paper, documentRevision: input.revision, ...(input.modelRequestId ? { modelRequestId: input.modelRequestId } : {}), items: [] }; tasks.push(task); return Promise.resolve(copy(task)); }), planAcquisition: vi.fn<ActionTasks['planAcquisition']>(input => { const task: ActionTaskRecord = { ...base(), question: input.question, kind: 'acquisition', target: input.target, items: [] }; tasks.push(task); return Promise.resolve(copy(task)); }), planOrganization: vi.fn<ActionTasks['planOrganization']>(input => { const task: ActionTaskRecord = { ...base(), question: input.question, kind: 'organization', ...(input.modelRequestId ? { modelRequestId: input.modelRequestId } : {}), items: [] }; tasks.push(task); return Promise.resolve(copy(task)); }), approve: vi.fn<ActionTasks['approve']>(id => Promise.resolve(copy(tasks.find(task => task.id === id)!))), cancel: vi.fn<ActionTasks['cancel']>(id => Promise.resolve(copy(tasks.find(task => task.id === id)!))), reconcile: vi.fn<ActionTasks['reconcile']>(id => Promise.resolve(copy(tasks.find(task => task.id === id)!))), undo: vi.fn<ActionTasks['undo']>(id => Promise.resolve(copy(tasks.find(task => task.id === id)!))) };
+  const port: ActionTasks = { list: () => Promise.resolve(copy(tasks)), get: id => Promise.resolve(copy(tasks.find(task => task.id === id)!)), subscribe: () => () => {}, planAnnotations: vi.fn<ActionTasks['planAnnotations']>(input => { const task: ActionTaskRecord = { ...base(), question: input.question, kind: 'annotations', paper: input.paper, documentRevision: input.revision, ...(input.modelRequestId ? { modelRequestId: input.modelRequestId } : {}), ...(input.autoApply ? { autoApply: true as const } : {}), items: [] }; tasks.push(task); return Promise.resolve(copy(task)); }), planAcquisition: vi.fn<ActionTasks['planAcquisition']>(input => { const task: ActionTaskRecord = { ...base(), question: input.question, kind: 'acquisition', target: input.target, items: [] }; tasks.push(task); return Promise.resolve(copy(task)); }), planOrganization: vi.fn<ActionTasks['planOrganization']>(input => { const task: ActionTaskRecord = { ...base(), question: input.question, kind: 'organization', ...(input.modelRequestId ? { modelRequestId: input.modelRequestId } : {}), items: [] }; tasks.push(task); return Promise.resolve(copy(task)); }), approve: vi.fn<ActionTasks['approve']>(id => Promise.resolve(copy(tasks.find(task => task.id === id)!))), cancel: vi.fn<ActionTasks['cancel']>(id => Promise.resolve(copy(tasks.find(task => task.id === id)!))), reconcile: vi.fn<ActionTasks['reconcile']>(id => Promise.resolve(copy(tasks.find(task => task.id === id)!))), undo: vi.fn<ActionTasks['undo']>(id => Promise.resolve(copy(tasks.find(task => task.id === id)!))) };
   return { port, tasks };
 }
 function smallBudget(): ReturnType<NonNullable<PresenterServices['contextBudget']>> {
@@ -344,16 +344,43 @@ it('turns an acquire workflow into a scoped native preview without sending a mod
   expect(f.sent).toHaveLength(0); expect(t.port.approve).not.toHaveBeenCalled(); f.presenter.dispose();
 });
 
-it('plans completed annotation JSON once against the frozen PDF version without approving writes', async () => {
+it('plans completed annotation JSON once against the frozen PDF version with auto-apply intent', async () => {
   const f = fixture({ document: true }); const t = taskPort(f.conversation().id); f.services.agent = agentPort({ tasks: () => Promise.resolve(t.port) });
   f.workspaceSettings().skills.push({ ...userSkill, id: 'annotate', name: 'Annotate', workflow: 'annotate' });
   await f.presenter.activate(); await f.presenter.selectSkill('annotate'); f.presenter.setMode('agent'); f.presenter.setQuestion('Mark the definition'); await f.presenter.send();
   const requestId = f.sent[0]!.requestId; const text = JSON.stringify({ candidates: [{ quote: 'Definition', pageIndex: 0, reason: 'Central definition' }] });
   f.emit({ type: 'messageCompleted', requestId, messageId: 'answer', finalText: text, phase: 'final' }); f.emit({ type: 'completed', requestId, messageId: 'answer', finalText: text });
   await vi.waitFor(() => expect(t.port.planAnnotations).toHaveBeenCalledTimes(1));
-  expect(t.port.planAnnotations).toHaveBeenCalledWith(expect.objectContaining({ revision: documentA.revision, modelRequestId: requestId }));
+  expect(t.port.planAnnotations).toHaveBeenCalledWith(expect.objectContaining({ revision: documentA.revision, modelRequestId: requestId, autoApply: true }));
   f.emit({ type: 'completed', requestId, messageId: 'answer', finalText: text }); await Promise.resolve(); await Promise.resolve();
   expect(t.port.planAnnotations).toHaveBeenCalledTimes(1); expect(t.port.approve).not.toHaveBeenCalled(); f.presenter.dispose();
+});
+
+it('resumes only newly flagged annotation reviews after a completed Agent turn', async () => {
+  for (const autoApply of [true, false]) {
+    const f = fixture({ document: true }); const t = taskPort(f.conversation().id); f.services.agent = agentPort({ tasks: () => Promise.resolve(t.port) });
+    f.workspaceSettings().skills.push({ ...userSkill, id: 'annotate', name: 'Annotate', workflow: 'annotate' });
+    await f.presenter.activate(); await f.presenter.selectSkill('annotate'); f.presenter.setMode('agent'); f.presenter.setQuestion('Mark the definition'); await f.presenter.send();
+    const requestId = f.sent[0]!.requestId;
+    const proposal = { quote: 'Definition', pageIndex: 0, reason: 'Central definition' };
+    const candidateId = 'bbbbbbbb-1111-4000-8000-000000000001';
+    const task: Extract<ActionTaskRecord, { kind: 'annotations' }> = {
+      schemaVersion: 1, id: requestId, conversationId: f.conversation().id, question: 'Mark the definition',
+      state: 'review', createdAt: 'now', updatedAt: 'now', revision: 1,
+      kind: 'annotations', paper: paperA, documentRevision: documentA.revision, modelRequestId: requestId,
+      ...(autoApply ? { autoApply: true as const } : {}),
+      items: [{ kind: 'annotation', id: candidateId, reservedKey: 'ANNOKEY1', status: 'candidate', proposal,
+        resolution: { status: 'resolved', candidate: { source: { paper: paperA, revision: documentA.revision, quote: proposal.quote }, text: proposal.quote, pageLabel: '1', sortIndex: '000', position: { pageIndex: 0, rects: [[1, 1, 2, 2]] } } } }],
+    };
+    t.tasks.push(task);
+    const text = JSON.stringify({ candidates: [proposal] });
+    f.emit({ type: 'messageCompleted', requestId, messageId: 'answer', finalText: text, phase: 'final' });
+    f.emit({ type: 'completed', requestId, messageId: 'answer', finalText: text });
+    if (autoApply) await vi.waitFor(() => expect(t.port.approve).toHaveBeenCalledWith(requestId, [candidateId]));
+    else { await Promise.resolve(); await Promise.resolve(); expect(t.port.approve).not.toHaveBeenCalled(); }
+    expect(t.port.planAnnotations).not.toHaveBeenCalled();
+    f.presenter.dispose();
+  }
 });
 
 it('routes a direct Chinese highlight request in Agent mode through the built-in annotation workflow', async () => {
@@ -370,7 +397,7 @@ it('routes a direct Chinese highlight request in Agent mode through the built-in
   f.emit({ type: 'messageCompleted', requestId, messageId: 'answer', finalText: text, phase: 'final' });
   f.emit({ type: 'completed', requestId, messageId: 'answer', finalText: text });
   await vi.waitFor(() => expect(t.port.planAnnotations).toHaveBeenCalledTimes(1));
-  expect(t.port.planAnnotations).toHaveBeenCalledWith(expect.objectContaining({ question: '高亮当前论文最重要的 5 处内容，并简要说明原因。', modelRequestId: requestId }));
+  expect(t.port.planAnnotations).toHaveBeenCalledWith(expect.objectContaining({ question: '高亮当前论文最重要的 5 处内容，并简要说明原因。', modelRequestId: requestId, autoApply: true }));
   expect(t.port.approve).not.toHaveBeenCalled(); f.presenter.dispose();
 });
 

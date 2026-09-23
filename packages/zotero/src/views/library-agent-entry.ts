@@ -46,36 +46,55 @@ export function mountLibraryAgentEntry(options: LibraryAgentEntryOptions): () =>
     node.setAttribute('data-zchatgpt-library-agent', '');
     if (node.localName === 'toolbarbutton') node.setAttribute('type', 'button');
     else { node.textContent = 'Agent'; node.setAttribute('type', 'button'); }
-    node.setAttribute('style', 'min-width:56px;height:28px;margin-left:5px;padding:0 8px;border:1px solid currentColor;border-radius:6px;font-weight:600');
+    node.setAttribute('style', 'height:30px;min-width:64px;flex-shrink:0;margin-inline-start:4px;padding-inline:8px;font-weight:600');
     return node;
   })();
   let menuItem: Element | null = null;
-  // Zotero 9's library controls live in the center column, not in a #zotero-toolbar node. Place
-  // the action beside its existing DOI lookup control so it is visible even with no selected item.
-  const lookup = doc.getElementById('zotero-tb-lookup');
-  if (lookup?.parentElement) lookup.after(trigger);
+  // Zotero 9.0.6 keeps the Add Item actions in #zotero-items-toolbar. Append after the final native
+  // Add Item action so the Agent sits at the end of that group and does not split Zotero controls.
+  const itemsToolbar = doc.getElementById('zotero-items-toolbar');
+  const lastAddItemAction = ['zotero-tb-note-add', 'zotero-tb-attachment-add', 'zotero-tb-lookup', 'zotero-tb-add']
+    .map(id => doc.getElementById(id))
+    .find((node): node is HTMLElement => !!node && (!itemsToolbar || node.parentElement === itemsToolbar));
+  if (lastAddItemAction?.parentElement) lastAddItemAction.after(trigger);
+  else if (itemsToolbar) itemsToolbar.append(trigger);
   else doc.getElementById('zotero-toolbar')?.append(trigger);
   const toolsMenu = doc.getElementById('menu_ToolsPopup');
   if (toolsMenu) {
-    menuItem = createXul('menuitem'); menuItem.setAttribute('label', 'Zotero library Agent');
+    menuItem = createXul('menuitem'); menuItem.setAttribute('label', 'Zotero Agent');
     menuItem.setAttribute('data-zchatgpt-library-agent-menu', '');
     toolsMenu.append(menuItem);
   }
 
   const panel = create('section'); panel.dataset.zchatgptLibraryAgentPanel = '';
-  panel.setAttribute('role', 'dialog'); panel.setAttribute('aria-label', 'Zotero library Agent'); panel.setAttribute('aria-modal', 'false'); panel.hidden = true;
-  setStyle(panel, { position: 'fixed', zIndex: '10000', top: '52px', right: '20px', width: 'min(520px, calc(100vw - 40px))', maxHeight: 'calc(100vh - 72px)', overflow: 'auto', padding: '18px', background: 'var(--material-background, #fff)', color: 'var(--fill-primary, #222)', border: '1px solid color-mix(in srgb, currentColor 18%, transparent)', borderRadius: '10px', boxShadow: '0 8px 28px rgb(0 0 0 / 24%)' });
-  const heading = create('h2', 'Zotero library Agent');
-  const explanation = create('p', 'Acquire an article from an explicit DOI or public article URL. Review the metadata and approve each Zotero write below.');
+  panel.setAttribute('role', 'dialog'); panel.setAttribute('aria-label', 'Zotero Agent'); panel.setAttribute('aria-modal', 'false'); panel.hidden = true;
+  setStyle(panel, { position: 'fixed', zIndex: '10000', top: '52px', right: '12px', width: 'min(460px, calc(100vw - 24px))', maxHeight: 'calc(100vh - 64px)', overflow: 'auto', padding: '14px', background: 'var(--material-background, Canvas)', color: 'var(--fill-primary, CanvasText)', border: '1px solid color-mix(in srgb, currentColor 18%, transparent)', borderRadius: '10px', boxShadow: '0 8px 28px rgb(0 0 0 / 24%)', boxSizing: 'border-box' });
+  const heading = create('h2', 'Zotero Agent');
+  setStyle(heading, { margin: '0', fontSize: '1.1em' });
+  const header = create('div'); setStyle(header, { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px' });
+  const close = create('button', 'Close'); close.type = 'button'; close.setAttribute('aria-label', 'Close Zotero Agent');
+  header.append(heading, close);
+  const tabs = create('div'); tabs.setAttribute('role', 'tablist'); tabs.setAttribute('aria-label', 'Zotero Agent actions');
+  setStyle(tabs, { display: 'flex', gap: '6px', margin: '12px 0' });
+  const getPaperTab = create('button', 'Get paper'); getPaperTab.type = 'button'; getPaperTab.id = 'zchatgpt-library-agent-tab-acquire';
+  getPaperTab.setAttribute('role', 'tab'); getPaperTab.setAttribute('aria-controls', 'zchatgpt-library-agent-panel-acquire');
+  const organizeTab = create('button', 'Organize selection'); organizeTab.type = 'button'; organizeTab.id = 'zchatgpt-library-agent-tab-organize';
+  organizeTab.setAttribute('role', 'tab'); organizeTab.setAttribute('aria-controls', 'zchatgpt-library-agent-panel-organize');
+  for (const tab of [getPaperTab, organizeTab]) setStyle(tab, { border: '0', borderBottom: '2px solid transparent', borderRadius: '0', background: 'transparent', padding: '6px 10px', cursor: 'pointer' });
+  tabs.append(getPaperTab, organizeTab);
+  const acquisitionView = create('section'); acquisitionView.id = 'zchatgpt-library-agent-panel-acquire';
+  acquisitionView.setAttribute('role', 'tabpanel'); acquisitionView.setAttribute('aria-labelledby', getPaperTab.id);
+  const organizationView = create('section'); organizationView.id = 'zchatgpt-library-agent-panel-organize';
+  organizationView.setAttribute('role', 'tabpanel'); organizationView.setAttribute('aria-labelledby', organizeTab.id); organizationView.hidden = true;
   const form = create('form');
   const collectionLabel = create('label', 'Save to collection'); collectionLabel.htmlFor = 'zchatgpt-library-agent-collection';
   const collection = create('select'); collection.id = collectionLabel.htmlFor; collection.required = true; collection.setAttribute('aria-label', 'Save to collection');
   const identifierLabel = create('label', 'DOI or public article URL'); identifierLabel.htmlFor = 'zchatgpt-library-agent-identifiers';
   const identifiers = create('textarea'); identifiers.id = identifierLabel.htmlFor; identifiers.rows = 3; identifiers.required = true; identifiers.placeholder = '10.1234/example or https://…'; identifiers.setAttribute('aria-label', identifierLabel.textContent ?? 'DOI or public article URL');
-  const submit = create('button', 'Prepare acquisition review'); submit.type = 'submit';
+  const submit = create('button', 'Find paper'); submit.type = 'submit';
   const organization = create('fieldset');
   const organizationLegend = create('legend', 'Organize selected library items');
-  const loginExplanation = create('p', 'Sign in to Codex to organize selected items. DOI and URL acquisition works without signing in.');
+  const loginExplanation = create('p', 'Sign in to Codex to organize your selected items.');
   const login = create('button', options.startLogin ? 'Sign in to Codex' : 'Codex sign-in unavailable'); login.type = 'button'; login.disabled = !options.startLogin;
   login.dataset.zchatgptCodexLogin = '';
   const loginStatus = create('p'); loginStatus.dataset.zchatgptCodexLoginStatus = ''; loginStatus.setAttribute('role', 'status'); loginStatus.setAttribute('aria-live', 'polite');
@@ -85,13 +104,30 @@ export function mountLibraryAgentEntry(options: LibraryAgentEntryOptions): () =>
   organization.append(organizationLegend, loginExplanation, login, loginStatus, organizationQuestion, organize, organizationStatus);
   if (!options.startLogin) loginStatus.textContent = 'Codex sign-in is not available in this Zotero window.';
   if (!options.organizeSelected) organizationStatus.textContent = 'Selected-item organization is being connected to the library Agent.';
-  const close = create('button', 'Close'); close.type = 'button'; close.setAttribute('aria-label', 'Close Zotero library Agent');
   const status = create('p'); status.setAttribute('role', 'status'); status.setAttribute('aria-live', 'polite');
   for (const field of [collection, identifiers]) setStyle(field, { display: 'block', boxSizing: 'border-box', width: '100%', margin: '5px 0 14px', padding: '7px' });
-  setStyle(form, { marginTop: '14px' }); setStyle(explanation, { lineHeight: '1.45' });
-  const controls = create('div'); controls.append(submit, close);
+  setStyle(form, { marginTop: '8px' });
+  setStyle(organization, { margin: '0', padding: '0', border: '0', minWidth: '0' });
+  setStyle(organizationLegend, { fontWeight: '600', padding: '0' });
+  setStyle(loginExplanation, { margin: '4px 0 8px' });
+  setStyle(organizationQuestion, { display: 'block', boxSizing: 'border-box', width: '100%', margin: '8px 0', padding: '7px' });
+  const controls = create('div'); controls.append(submit);
   form.append(collectionLabel, collection, identifierLabel, identifiers, controls, status);
-  const tasksRoot = create('div'); panel.append(heading, explanation, form, organization, tasksRoot);
+  acquisitionView.append(form);
+  organizationView.append(organization);
+  const tasksHeading = create('h3', 'Recent tasks'); setStyle(tasksHeading, { margin: '14px 0 8px', fontSize: '1em' }); tasksHeading.hidden = true;
+  const tasksRoot = create('div'); panel.append(header, tabs, acquisitionView, organizationView, tasksHeading, tasksRoot);
+  const selectTab = (index: number, moveFocus = false) => {
+    const selected = index === 0 ? getPaperTab : organizeTab;
+    getPaperTab.setAttribute('aria-selected', String(selected === getPaperTab)); getPaperTab.tabIndex = selected === getPaperTab ? 0 : -1;
+    organizeTab.setAttribute('aria-selected', String(selected === organizeTab)); organizeTab.tabIndex = selected === organizeTab ? 0 : -1;
+    getPaperTab.style.borderBottomColor = selected === getPaperTab ? 'currentColor' : 'transparent';
+    organizeTab.style.borderBottomColor = selected === organizeTab ? 'currentColor' : 'transparent';
+    getPaperTab.style.fontWeight = selected === getPaperTab ? '600' : '400'; organizeTab.style.fontWeight = selected === organizeTab ? '600' : '400';
+    acquisitionView.hidden = selected !== getPaperTab; organizationView.hidden = selected !== organizeTab;
+    if (moveFocus) selected.focus();
+  };
+  selectTab(0);
   (doc.body ?? doc.documentElement).append(panel);
 
   let tasks: ActionTasks | undefined;
@@ -104,6 +140,7 @@ export function mountLibraryAgentEntry(options: LibraryAgentEntryOptions): () =>
   const refresh = async () => {
     const controller = tasks ??= await options.getTasks();
     const records = await controller.list(options.sessionId);
+    tasksHeading.hidden = records.length === 0;
     taskView?.update({ tasks: records });
     const latest = records[0];
     if (!latest) return;
@@ -120,7 +157,7 @@ export function mountLibraryAgentEntry(options: LibraryAgentEntryOptions): () =>
   const collectionLabelFor = (target: NativeCollectionTarget) => labels().get(`${target.clientId}:${target.libraryId}:${target.collectionKey}`) ?? 'Zotero collection';
   const open = async () => {
     panel.hidden = false;
-    identifiers.focus();
+    (organizationView.hidden ? identifiers : organizationQuestion).focus();
     status.textContent = 'Loading editable collections and saved acquisition reviews…';
     try {
       const [controller, available] = await Promise.all([options.getTasks(), options.collections()]);
@@ -158,6 +195,14 @@ export function mountLibraryAgentEntry(options: LibraryAgentEntryOptions): () =>
   const onPanelKeydown = (event: KeyboardEvent) => {
     if (event.key !== 'Escape' || event.isComposing) return;
     event.preventDefault(); onClose();
+  };
+  const onTabClick = (event: Event) => selectTab(event.currentTarget === organizeTab ? 1 : 0);
+  const onTabKeydown = (event: KeyboardEvent) => {
+    if (event.isComposing) return;
+    const current = event.target === organizeTab ? 1 : 0;
+    const next = event.key === 'ArrowRight' ? (current + 1) % 2 : event.key === 'ArrowLeft' ? (current + 1) % 2 : event.key === 'Home' ? 0 : event.key === 'End' ? 1 : -1;
+    if (next < 0) return;
+    event.preventDefault(); selectTab(next, true);
   };
   const onLogin = () => {
     if (!options.startLogin || loginBusy) return;
@@ -207,10 +252,12 @@ export function mountLibraryAgentEntry(options: LibraryAgentEntryOptions): () =>
   panel.addEventListener('keydown', onPanelKeydown);
   login.addEventListener('click', onLogin);
   organize.addEventListener('click', onOrganize);
+  getPaperTab.addEventListener('click', onTabClick); organizeTab.addEventListener('click', onTabClick);
+  tabs.addEventListener('keydown', onTabKeydown);
 
   return () => {
     disposed = true; unobserve?.(); taskView?.dispose(); trigger.removeEventListener('click', onOpen); trigger.remove();
     menuItem?.removeEventListener('command', onOpen); menuItem?.removeEventListener('click', onOpen); menuItem?.remove();
-    collection.removeEventListener('change', onCollectionChange); form.removeEventListener('submit', onSubmit); close.removeEventListener('click', onClose); panel.removeEventListener('keydown', onPanelKeydown); login.removeEventListener('click', onLogin); organize.removeEventListener('click', onOrganize); panel.remove();
+    collection.removeEventListener('change', onCollectionChange); form.removeEventListener('submit', onSubmit); close.removeEventListener('click', onClose); panel.removeEventListener('keydown', onPanelKeydown); login.removeEventListener('click', onLogin); organize.removeEventListener('click', onOrganize); getPaperTab.removeEventListener('click', onTabClick); organizeTab.removeEventListener('click', onTabClick); tabs.removeEventListener('keydown', onTabKeydown); panel.remove();
   };
 }

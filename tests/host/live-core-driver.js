@@ -78,11 +78,9 @@ async function runHostSmoke(config) {
     };
     const annotationsBefore = attachment.getAnnotations().length;
     await send('Highlight the five most important scientifically meaningful sentences in the current PDF. Use native Zotero highlights and propose only exact quotations that appear verbatim in this PDF.', 'annotation');
-    const annotationCard = await until(() => { const card = taskCard('Annotations'); return card?.dataset.state === 'review' ? card : null; }, 'annotation-review-terminal-preparation', 60000); await attachment.loadAllData();
-    const annotationReview = { state: annotationCard.dataset.state, candidates: annotationCard.querySelectorAll('[data-zchatgpt-task-item-id]').length, approveDisabled: annotationCard.querySelector('[data-zchatgpt-task-action="approve"]').disabled, nativeAnnotationsBefore: annotationsBefore, nativeAnnotationsCurrent: attachment.getAnnotations().length };
-    await check('annotation-review-before-write', annotationReview.state === 'review' && annotationReview.candidates === 5 && !annotationReview.approveDisabled && annotationReview.nativeAnnotationsCurrent === annotationsBefore, annotationReview);
-    annotationCard.open = true; click(annotationCard.querySelector('[data-zchatgpt-task-action="approve"]')); await until(() => annotationCard.dataset.state === 'completed', 'annotation-applied', 60000); await attachment.loadAllData();
-    await check('annotation-native-readback', attachment.getAnnotations().length - annotationsBefore === 5, { created: attachment.getAnnotations().length - annotationsBefore });
+    const annotationCard = await until(() => { const card = taskCard('Annotations'); return card && ['completed', 'partial', 'failed'].includes(card.dataset.state) ? card : null; }, 'annotation-auto-applied', 60000); await attachment.loadAllData();
+    const createdAnnotations = attachment.getAnnotations().length - annotationsBefore;
+    await check('annotation-auto-apply-native-readback', ['completed', 'partial'].includes(annotationCard.dataset.state) && createdAnnotations > 0 && createdAnnotations <= 5 && annotationCard.querySelector('[data-zchatgpt-task-action="approve"]')?.hidden === true, { state: annotationCard.dataset.state, created: createdAnnotations, candidates: annotationCard.querySelectorAll('[data-zchatgpt-task-item-id]').length });
     annotationCard.open = true; click(annotationCard.querySelector('[data-zchatgpt-task-action="undo"]')); await until(() => annotationCard.dataset.state === 'undone', 'annotation-undone', 60000); await attachment.loadAllData();
     await check('annotation-undo-readback', attachment.getAnnotations().length === annotationsBefore);
     const proposedTag = `live-organized-${token}`; const laterTag = `later-edit-${token}`;

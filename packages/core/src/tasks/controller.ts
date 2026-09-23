@@ -3,7 +3,7 @@ import { NATIVE_ANNOTATION_PROVENANCE, NativeOperationError, type NativeActionPo
 import { ReaderError, type DocumentRevision } from '../../../contracts/src/index.ts';
 import { validatePaperScope } from '../../../contracts/src/validation.ts';
 import type { StoragePort } from '../../../contracts/src/runtime.ts';
-import { validateAnnotationProposal as proposal, validateOrganizationProposal, type AcquisitionChoice, type AcquisitionTaskItem, type ActionTaskOperation, type ActionTaskRecord, type ActionTasks, type AnnotationTaskItem, type OrganizationTaskItem } from '../../../contracts/src/tasks.ts';
+import { cleanAnnotationReason, validateAnnotationProposal as proposal, validateOrganizationProposal, type AcquisitionChoice, type AcquisitionTaskItem, type ActionTaskOperation, type ActionTaskRecord, type ActionTasks, type AnnotationTaskItem, type OrganizationTaskItem } from '../../../contracts/src/tasks.ts';
 export interface ActionTaskClock { uuid(): string; key(): string; now(): string }
 interface TaskCoordination { queue: Promise<void>; active: Map<string, AbortController>; stopRequests: Set<string> }
 const coordinationByStorage = new WeakMap<StoragePort, TaskCoordination>();
@@ -57,14 +57,15 @@ function choice(value: unknown): AcquisitionChoice {
   return clone(c);
 }
 export function validateTaskRecord(value: unknown): ActionTaskRecord {
-  const raw = record(value, ['schemaVersion', 'id', 'conversationId', 'kind', 'state', 'question', 'createdAt', 'updatedAt', 'revision', 'approvedAt', 'cancelRequested', 'paper', 'documentRevision', 'modelRequestId', 'target', 'items']);
+  const raw = record(value, ['schemaVersion', 'id', 'conversationId', 'kind', 'state', 'question', 'createdAt', 'updatedAt', 'revision', 'approvedAt', 'cancelRequested', 'paper', 'documentRevision', 'modelRequestId', 'autoApply', 'target', 'items']);
   if (raw.schemaVersion !== 1 || !STATES.includes(String(raw.state)) || !['annotations', 'acquisition', 'organization'].includes(String(raw.kind))) invalid();
   id(raw.id); id(raw.conversationId); text(raw.question, 16000); text(raw.createdAt, 64, 1); text(raw.updatedAt, 64, 1);
   if (!Number.isSafeInteger(raw.revision) || (raw.revision as number) < 0 || !Array.isArray(raw.items) || raw.items.length > 50 || (raw.cancelRequested !== undefined && raw.cancelRequested !== true)) invalid();
   if (raw.kind === 'organization' && raw.items.length === 0) invalid();
   if (raw.approvedAt !== undefined) text(raw.approvedAt, 64, 1);
-  if (raw.kind === 'annotations') { validatePaperScope(raw.paper); documentRevision(raw.documentRevision); if (raw.modelRequestId !== undefined) id(raw.modelRequestId); }
-  else if (raw.kind === 'acquisition') collectionTarget(raw.target);
+  if (raw.kind === 'annotations') { validatePaperScope(raw.paper); documentRevision(raw.documentRevision); if (raw.modelRequestId !== undefined) id(raw.modelRequestId); if (raw.autoApply !== undefined && raw.autoApply !== true) invalid(); }
+  else if (raw.kind === 'acquisition') { if (raw.autoApply !== undefined) invalid(); collectionTarget(raw.target); }
+  else if (raw.autoApply !== undefined) invalid();
   else if (raw.modelRequestId !== undefined) id(raw.modelRequestId);
   const ids = new Set<string>(); const keys = new Set<string>();
   for (const value of raw.items) {
@@ -131,6 +132,7 @@ function aggregate(task: ActionTaskRecord): ActionTaskRecord['state'] {
   if (selected.some(item => ['uncertain', 'writing', 'undoing'].includes(item.status))) return 'uncertain';
   if (selected.some(item => item.status === 'conflict')) return 'conflict';
   if (selected.length && selected.every(item => item.status === 'undone')) return 'undone';
+  if (task.kind === 'annotations' && task.autoApply && task.items.some(item => item.status === 'unresolved')) return 'partial';
   if (selected.some(item => item.kind === 'acquisition' && item.attachmentUndone && item.status !== 'undone')) return task.cancelRequested ? 'cancelled' : 'partial';
   if (selected.length && selected.every(item => ['applied', 'metadata-only', 'undone'].includes(item.status))) return selected.some(item => item.status === 'metadata-only') ? 'partial' : 'completed';
   if (task.cancelRequested) return 'cancelled';
@@ -202,23 +204,23 @@ export class ActionTaskController implements ActionTasks {
     const abort = new AbortController(); this.active.set(task.id, abort);
     try { await this.save(task); } catch (error) { this.active.delete(task.id); throw error; } return abort;
   }
-  planAnnotations: ActionTasks['planAnnotations'] = value => {
-    const input = clone(value); if (!Array.isArray(input.candidates)) invalid(); const candidates = input.candidates.map(proposal); if (candidates.length > 50) invalid();
+  planAnnotations: ActionTasks['planAnnotations'] = async value => {
+    const input = clone(value); if (!Array.isArray(input.candidates) || (input.autoApply !== undefined && input.autoApply !== true)) invalid(); const candidates = input.candidates.map(candidate => { const checked = proposal(candidate); return { ...checked, reason: input.autoApply ? cleanAnnotationReason(checked.reason) : checked.reason }; }); if (candidates.length > 50) invalid();
     const frozen = { conversationId: id(input.conversationId), question: text(input.question, 16000), paper: validatePaperScope(input.paper), documentRevision: documentRevision(input.revision) };
     const requestID = input.modelRequestId === undefined ? undefined : id(input.modelRequestId);
-    return this.serial(async () => {
+    const planned = await this.serial(async () => {
       let existing: Extract<ActionTaskRecord, { kind: 'annotations' }> | undefined;
       if (requestID) {
         let bytes: Uint8Array | null; try { bytes = await this.storage.read(this.path(requestID)); } catch { unavailable(); }
         if (bytes) {
           const stored = await this.load(requestID);
-          if (stored.kind !== 'annotations' || stored.modelRequestId !== requestID || stored.conversationId !== frozen.conversationId || stored.question !== frozen.question || !equal(stored.paper, frozen.paper) || !equal(stored.documentRevision, frozen.documentRevision) || !equal(stored.items.map(item => item.proposal), candidates)) throw new ReaderError('REQUEST_CONFLICT', 'This model request already belongs to a different annotation task.');
+          if (stored.kind !== 'annotations' || stored.modelRequestId !== requestID || stored.conversationId !== frozen.conversationId || stored.question !== frozen.question || !equal(stored.paper, frozen.paper) || !equal(stored.documentRevision, frozen.documentRevision) || !equal(stored.items.map(item => item.proposal), candidates) || stored.autoApply !== input.autoApply) throw new ReaderError('REQUEST_CONFLICT', 'This model request already belongs to a different annotation task.');
           if (stored.state !== 'preparing' || stored.approvedAt || stored.cancelRequested) return this.recovered(stored);
           // A read-only preparation interrupted by shutdown may resume under its original keys.
           existing = stored;
         }
       }
-      const task: Extract<ActionTaskRecord, { kind: 'annotations' }> = existing ?? { ...this.base(frozen.conversationId, frozen.question), ...frozen, ...(requestID ? { id: requestID, modelRequestId: requestID } : {}), kind: 'annotations', items: candidates.map(p => ({ kind: 'annotation', id: id(this.clock.uuid()), reservedKey: key(this.clock.key()), status: 'candidate', proposal: p })) };
+      const task: Extract<ActionTaskRecord, { kind: 'annotations' }> = existing ?? { ...this.base(frozen.conversationId, frozen.question), ...frozen, ...(requestID ? { id: requestID, modelRequestId: requestID } : {}), ...(input.autoApply ? { autoApply: true as const } : {}), kind: 'annotations', items: candidates.map(p => ({ kind: 'annotation', id: id(this.clock.uuid()), reservedKey: key(this.clock.key()), status: 'candidate', proposal: p })) };
       const abort = existing ? new AbortController() : await this.begin(task);
       if (existing) this.active.set(task.id, abort);
       if (this.stopRequests.has(task.id)) abort.abort();
@@ -241,10 +243,18 @@ export class ActionTaskController implements ActionTasks {
           if (abort.signal.aborted) break;
           await this.save(task);
         }
-        if (abort.signal.aborted) { task.cancelRequested = true; task.state = 'cancelled'; } else task.state = 'review';
+        if (abort.signal.aborted) { task.cancelRequested = true; task.state = 'cancelled'; }
+        else if (task.autoApply && !task.items.some(item => item.kind === 'annotation' && item.status === 'candidate' && item.resolution?.status === 'resolved')) task.state = 'failed';
+        else task.state = 'review';
         await this.save(task); return clone(task);
       } finally { this.active.delete(task.id); }
     });
+    // The user explicitly chose the annotate workflow. Persist that intent with the review so a
+    // completed candidate plan can proceed after restart; only uniquely resolved candidates enter
+    // the existing approval/write/readback/undo path.
+    if (planned.kind !== 'annotations' || !planned.autoApply || planned.state !== 'review' || planned.approvedAt) return planned;
+    const selected = planned.items.filter(item => item.kind === 'annotation' && item.status === 'candidate' && item.resolution?.status === 'resolved').map(item => item.id);
+    return selected.length ? this.approve(planned.id, selected) : planned;
   };
   planOrganization: ActionTasks['planOrganization'] = value => {
     const input = clone(value);
@@ -325,7 +335,7 @@ export class ActionTaskController implements ActionTasks {
       if (Object.keys(choices).some(value => !selectedIDs.includes(value))) invalid();
       for (const item of task.items) {
         item.selected = selectedIDs.includes(item.id);
-        if (!item.selected) { item.status = 'skipped'; continue; }
+        if (!item.selected) { if (item.status === 'candidate') item.status = 'skipped'; continue; }
         if (item.status !== 'candidate') invalid();
         if (item.kind === 'annotation') { if (item.resolution?.status !== 'resolved') invalid(); }
         else if (item.kind === 'acquisition') {

@@ -645,6 +645,29 @@ describe('conversation presenter', () => {
     expect(f.last().conversation?.messages[0]?.settings).toEqual(legacySettings);
     expect(f.last().conversation?.messages.at(-1)?.settings).toEqual({ model: 'gpt-6-luna', serviceTier: null, effort: 'low' });
   });
+  it('refreshes the live model allowlist and unsent draft while preserving an in-flight model snapshot', async () => {
+    const initial: WorkspaceSettings = { ...defaultSettings(), allowedModels: [{ id: 'gpt-6-sol', name: 'GPT-6 Sol' }] };
+    const f = fixture({ workspaceSettings: initial }); let resolve!: (value: typeof documentA) => void;
+    const prepare = () => new Promise<typeof documentA>(done => { resolve = done; });
+    const presenter = new ConversationPresenter(presenterContext(paperA, 'Synthetic Paper A'), {
+      ...f.services,
+      document: { prepare, validate: async () => {}, readEnabled: () => true, writeEnabled: () => {} },
+    });
+    await presenter.activate();
+    f.setRuntime({ models: [model, other] });
+    presenter.setMode('agent'); presenter.setQuestion('Keep the request frozen');
+    const sending = presenter.send(); await settle();
+    expect(presenter.snapshot().generating).toBe(true);
+
+    const updated: WorkspaceSettings = { ...initial, allowedModels: [{ id: 'gpt-6-luna', name: 'GPT-6 Luna' }] };
+    presenter.refreshWorkspaceSettings(updated);
+    expect(presenter.snapshot().workspace?.allowedModels).toEqual(updated.allowedModels);
+    expect(presenter.snapshot().draft.settings?.model).toBe('gpt-6-luna');
+
+    resolve(documentA); await sending;
+    expect(f.sent[0]?.settings.model).toBe('gpt-6-sol');
+    expect(presenter.snapshot().draft.settings?.model).toBe('gpt-6-luna');
+  });
   it('changing controls while generating leaves the in-flight snapshot alone and applies only to the next send', async () => {
     const f = fixture(); await f.presenter.activate();
     f.setRuntime({ models: [model, other] });

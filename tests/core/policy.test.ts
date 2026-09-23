@@ -81,6 +81,20 @@ it('asks for a short verbatim quote in the citation link title so the cited pass
   const noDoc = readingInput({ requestId: 'r', conversationId: 'c', action: 'ask', question: 'q', citations: [], settings: { model: 'm', serviceTier: null, effort: null } });
   expect(noDoc.split('\n\n')[0]).not.toContain('verbatim');
 });
+it('keeps source links out of generated annotation comments and asks for a plain-text reason', () => {
+  const document: DocumentContext = {
+    id: 'aaaaaaaa-bbbb-8ccc-addd-eeeeeeeeeeee', paper: paperA,
+    revision: { fingerprint: 'synthetic', size: 12, modifiedAt: 1, sha256: 'a'.repeat(64) },
+    parserVersion: 'zotero-native-text-v2', totalPages: 1,
+    pages: [{ pageIndex: 0, pageLabel: '1', text: 'Synthetic evidence.', status: 'text' }],
+  };
+  const annotate = defaultSettings().skills.find(skill => skill.workflow === 'annotate')!;
+  const text = readingInput({ requestId: 'r', conversationId: 'c', action: 'ask', question: 'Highlight this.', citations: [], settings: { model: 'm', serviceTier: null, effort: null }, document, workflow: { skill: annotate, preferences: defaultSettings().preferences, profileId: null } });
+  const [instruction] = text.split('\n\n');
+  expect(instruction).toContain('plain-text explanation');
+  expect(instruction).toContain('Do not put a page citation, URL, or Markdown link in reason');
+  expect(instruction).not.toContain('https://zchatgpt.invalid/source/');
+});
 it('injects bibliographic paper identity on ask even without a citation', () => {
   const text = readingInput({
     requestId: 'r', conversationId: 'c', action: 'ask', question: '这篇在讲什么方向？', citations: [],

@@ -66,6 +66,8 @@ export interface WorkflowSnapshot {
   skill: ReaderSkill | null;
   preferences: Personalization;
   profileId: string | null;
+  /** Present only on new, explicitly sent Agent annotate requests; old requests stay review-only. */
+  autoApplyAnnotations?: true;
 }
 export interface ReferenceInput extends ReaderReference { document?: DocumentContext }
 export interface WorkspaceDraft extends Draft {
