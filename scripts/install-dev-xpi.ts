@@ -667,7 +667,6 @@ async function readReportedVersion(profileDir: string, addonId: string): Promise
 async function revertLever(
   profileDir: string,
   record: InstallRecord | null,
-  deps: DevInstallDeps,
   apply: boolean,
 ): Promise<LeverPlan> {
   const userJsPath = path.join(profileDir, 'user.js');
@@ -711,7 +710,6 @@ async function revertLever(
 
 async function checkCommand(
   profileDir: string,
-  options: RunOptions,
   deps: DevInstallDeps,
 ): Promise<DevInstallOutcome> {
   const record = await readRecord(`${path.join(profileDir, 'extensions', `${SUBJECT_ID}.xpi`)}${RECORD_SUFFIX}`);
@@ -798,7 +796,7 @@ async function checkCommand(
     );
   }
 
-  const lever = await revertLever(profileDir, record, deps, true);
+  const lever = await revertLever(profileDir, record, true);
   if (lever.nextStep !== null) instructions.push(lever.nextStep);
   if (lever.state === 'manual-restore-required') notes.push(lever.nextStep ?? '');
 
@@ -955,7 +953,7 @@ async function revertCommand(profileDir: string, deps: DevInstallDeps): Promise<
   const recordPath = `${installedPath}${RECORD_SUFFIX}`;
   const record = await readTextOrNull(recordPath) === null ? null : await readRecord(recordPath);
   const running = detectRunning(profileDir, deps);
-  const lever = await revertLever(profileDir, record, deps, true);
+  const lever = await revertLever(profileDir, record, true);
   const instructions: string[] = [];
   if (lever.nextStep !== null) instructions.push(lever.nextStep);
   return {
@@ -1040,7 +1038,7 @@ export async function run(argv: string[], deps: DevInstallDeps = realDeps()): Pr
   const profileDir = await resolveProfileDir(options);
   if (options.command === 'rollback') return rollbackCommand(profileDir, options, deps);
   if (options.command === 'revert') return revertCommand(profileDir, deps);
-  if (options.command === 'check') return checkCommand(profileDir, options, deps);
+  if (options.command === 'check') return checkCommand(profileDir, deps);
   return installCommand(profileDir, options, deps, SUBJECT_ID);
 }
 

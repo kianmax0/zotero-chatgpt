@@ -1229,7 +1229,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
    * to refuse is remembered, but a later route that attaches those bytes wins and the refusal is not
    * shown. Routes are tried in order of fidelity.
    */
-  const readClipboardRoutes = async (clipboard: ClipboardLike | null | undefined, routes: Array<() => Promise<ClipboardImageRead>>): Promise<void> => {
+  const readClipboardRoutes = async (routes: Array<() => Promise<ClipboardImageRead>>): Promise<void> => {
     let refusal: ClipboardImageRefusal | undefined;
     let attached = false;
     let throws = 0;
@@ -1281,7 +1281,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     // no image data of its own falls through to the privileged pasteboard.
     if (!clipboardHasImage(clipboard) && clipboardHasText(clipboard)) return;
     event.preventDefault();
-    void readClipboardRoutes(clipboard, pasteRoutes(clipboard));
+    void readClipboardRoutes(pasteRoutes(clipboard));
   };
   composer.addEventListener('dragover', event => { if (clipboardHasImage(event.dataTransfer)) { event.preventDefault(); if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'; } });
   composer.addEventListener('drop', event => {
@@ -1323,7 +1323,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     if (!isComposing(event) && (event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'v') {
       pasteEventSeen = false;
       // The keypress default action and its paste event run before timers, so a real paste wins.
-      setTimeout(() => { if (!pasteEventSeen) void readClipboardRoutes(null, pasteRoutes(null)); }, 0);
+      setTimeout(() => { if (!pasteEventSeen) void readClipboardRoutes(pasteRoutes(null)); }, 0);
     }
   });
   input.addEventListener('keydown', event => {

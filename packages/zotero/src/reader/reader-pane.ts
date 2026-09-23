@@ -63,7 +63,6 @@ export class NativeReaderPane implements LayoutHost {
   constructor(
     private zotero: ZoteroHost,
     readonly reader: HostReader,
-    private readonly _paneID: string,
     private buttons: Set<HTMLButtonElement>,
     private renderView: SidebarRenderer,
     private assets?: ReaderPaneAssets,

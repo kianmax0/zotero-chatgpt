@@ -29,7 +29,7 @@ jobs:
       - run: npm run test:unit
 
   # Packaging must exercise the same commands docs/development.md promises. scripts/runtime-prepare.mjs
-  # fetches the pinned, SHA-256-verified Codex 0.154.0 darwin/arm64 archive into the ignored
+  # fetches the pinned, SHA-256-verified Codex 0.156.1 darwin/arm64 archive into the ignored
   # `.zotero-chatgpt-dev/runtime-cache/`; CI only packages and hashes it, it never executes it. The XPI name is
   # derived from packages/zotero/manifest.json, so a version bump cannot silently drift out of sync.
   package:
