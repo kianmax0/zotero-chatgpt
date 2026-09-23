@@ -28,7 +28,7 @@ const complete = (p: ReturnType<typeof server>['p'], threadId: string, turnId: s
 
 async function setup(lines: string[] = [], storage = new MemoryStorage()) {
   const s = server();
-  const c = await createReaderClient(s.p, storage, { codexVersion: '0.154.0', cwd: '/isolated', uuid, loginTimeoutMs: 1000, deltaFlushMs: 1, now: () => '2026-09-09T08:00:00.000Z', trace: line => lines.push(line) });
+  const c = await createReaderClient(s.p, storage, { codexVersion: '0.156.1', cwd: '/isolated', uuid, loginTimeoutMs: 1000, deltaFlushMs: 1, now: () => '2026-09-09T08:00:00.000Z', trace: line => lines.push(line) });
   clients.push(c);
   await c.refreshAccount();
   const conversation = await c.current(paperA, 'Synthetic Paper A');
@@ -135,7 +135,7 @@ describe('Chat never enters the Codex Agent runtime', () => {
 
   it('I: a Chat refusal is not an auth failure, so an uninitialized Codex cannot make Chat look signed-out', async () => {
     const s = server();
-    const c = await createReaderClient(s.p, new MemoryStorage(), { codexVersion: '0.154.0', cwd: '/isolated', uuid, loginTimeoutMs: 1000, deltaFlushMs: 1, now: () => '2026-09-09T08:00:00.000Z', trace: () => undefined });
+    const c = await createReaderClient(s.p, new MemoryStorage(), { codexVersion: '0.156.1', cwd: '/isolated', uuid, loginTimeoutMs: 1000, deltaFlushMs: 1, now: () => '2026-09-09T08:00:00.000Z', trace: () => undefined });
     clients.push(c);
     // No refreshAccount: the Codex channel was never opened, so the catalog is empty and the runtime
     // would answer AUTH_REQUIRED to an Agent request. Chat must refuse for its own reason instead.

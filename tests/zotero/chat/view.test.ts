@@ -17,11 +17,13 @@ import type { HistoryEntry, ReaderWorkspace } from '../../../packages/contracts/
 import { defaultSettings } from '../../../packages/core/src/workspace/skills.ts';
 import type { ContextBudget } from '../../../packages/core/src/codex/model-capabilities.ts';
 import { documentSummary } from '../../../packages/contracts/src/document.ts';
-import { citationA, imageA, paperA, paperB, settings, TINY_PNG_DATA_URL } from '../../contracts/factories.ts';
+import { citationA, imageA, paperA, paperB, settings as baseSettings, TINY_PNG_DATA_URL } from '../../contracts/factories.ts';
 import { presenterContext } from '../presenter-context.ts';
 
+const settings = { ...baseSettings, model: 'gpt-6-sol' };
+
 const model: ModelOption = {
-  id: 'catalog-default', displayName: 'Catalog Default', isDefault: true,
+  id: 'gpt-6-sol', displayName: 'GPT-6 Sol', isDefault: true,
   supportedReasoningEfforts: [
     { id: 'low', description: '' }, { id: 'medium', description: '' },
     { id: 'high', description: '' }, { id: 'xhigh', description: '' },
@@ -41,6 +43,7 @@ async function mountReadyChat(options: {
   draftCitations?: typeof citationA[];
   draftImages?: typeof imageA[];
   conversations?: Conversation[];
+  runtimeModels?: ModelOption[];
   textScale?: { value: number };
   readerZoom?: { factor: number; ins: number; outs: number; resets: number };
   sent?: SendInput[];
@@ -77,7 +80,7 @@ async function mountReadyChat(options: {
   };
   const runtime: RuntimeSnapshot = {
     revision: 0, runtime: 'ready', account: { state: 'signedIn' }, login: null,
-    models: [model], error: null,
+    models: options.runtimeModels ?? [model], error: null,
     ...(options.rateLimits ? { rateLimits: options.rateLimits } : {}),
   };
   const listed = options.conversations ?? [conversation];
@@ -318,10 +321,11 @@ it('keeps the common header to one row and moves the context summary into the de
   }
 });
 
-it('shows the local read of this PDF in the details so a successful auto-read is not invisible', async () => {
+it('shows PDF page coverage for Agent after the local read completes', async () => {
   const { root, presenter } = await mountReadyChat({
     document: { prepare: () => Promise.resolve(documentA), validate: async () => {}, readEnabled: () => true, writeEnabled: () => {} },
   });
+  presenter.setMode('agent');
   await vi.waitFor(() => expect(presenter.snapshot().document.prepared).not.toBeNull());
   expect(nextSendSummary(root)).toBe('Current PDF · all 2 pages read locally');
 });
@@ -330,6 +334,7 @@ it('reports reading in progress instead of leaving the owner with no evidence at
   const { root, presenter } = await mountReadyChat({
     document: { prepare: () => new Promise(() => {}), validate: async () => {}, readEnabled: () => true, writeEnabled: () => {} },
   });
+  presenter.setMode('agent');
   await vi.waitFor(() => expect(presenter.snapshot().document.phase).toBe('preparing'));
   expect(nextSendSummary(root)).toBe('Preparing current PDF text…');
 });
@@ -342,17 +347,26 @@ it('claims only the pages that really carried text when part of the PDF is scann
   const { root, presenter } = await mountReadyChat({
     document: { prepare: () => Promise.resolve(partial), validate: async () => {}, readEnabled: () => true, writeEnabled: () => {} },
   });
+  presenter.setMode('agent');
   await vi.waitFor(() => expect(presenter.snapshot().document.prepared).not.toBeNull());
   expect(nextSendSummary(root)).toBe('Current PDF · excerpts from 1 of 2 pages');
 });
 
-it('states that automatic PDF context is off instead of leaving the summary blank', async () => {
+it('states that automatic paper context is off in Chat instead of describing PDF pages', async () => {
   const { root } = await mountReadyChat({
     document: { prepare: () => Promise.resolve(documentA), validate: async () => {}, readEnabled: () => false, writeEnabled: () => {} },
   });
   // UI-03: the summary must answer what the next send carries; an off switch is a real scope fact,
   // not a blank line, so the owner can tell nothing from this PDF will be attached.
-  expect(nextSendSummary(root)).toBe('Automatic PDF context is off');
+  expect(nextSendSummary(root)).toBe('Automatic paper context is off');
+});
+
+it('shows metadata and abstract as the next Chat context without claiming local PDF pages', async () => {
+  const { root, presenter } = await mountReadyChat({
+    document: { prepare: () => Promise.resolve(documentA), validate: async () => {}, readEnabled: () => true, writeEnabled: () => {} },
+  });
+  expect(presenter.snapshot().mode).toBe('chat');
+  expect(nextSendSummary(root)).toBe('Paper details and stored abstract will be included when available · no PDF body text');
 });
 
 it('sends every field the reader read in the paper identity instead of a four-field subset', async () => {
@@ -573,26 +587,27 @@ it('draws a complete solid ring while the context is unknown, never a percentage
   expect(ring.querySelector('.zchatgpt-context-ring-fill')!.getAttribute('stroke-dasharray')).toBe('none');
 });
 
-it('keeps the solid ring and the honest number when a usage report has no window', async () => {
+it('uses the pinned fallback window when a usage report omits one', async () => {
   const { root } = await mountReadyChat({
     usage: {
-      model: 'catalog-default', contextWindow: null,
+      model: 'gpt-6-sol', contextWindow: null,
       last: { inputTokens: 12300, cachedInputTokens: 0, outputTokens: 300, reasoningOutputTokens: 0, totalTokens: 12600 },
       total: { inputTokens: 12300, cachedInputTokens: 0, outputTokens: 300, reasoningOutputTokens: 0, totalTokens: 12600 },
     },
   });
   const ring = root.querySelector<HTMLElement>('[data-zchatgpt-context-usage]')!;
-  expect(ring.dataset.zchatgptContextState).toBe('unknown');
-  expect(ring.querySelector('.zchatgpt-context-ring-fill')!.getAttribute('stroke-dasharray')).toBe('none');
+  expect(ring.dataset.zchatgptContextState).toBe('pinned-catalog');
   expect(ring.getAttribute('aria-label')).toContain('12,300');
-  expect(ring.getAttribute('aria-label')).toContain('window is unknown');
+  expect(ring.getAttribute('aria-label')).toContain('272,000');
+  expect(ring.getAttribute('aria-label')).toContain('bundled catalog estimate');
   expect(ring.getAttribute('aria-label')).not.toContain('%');
+  expect(ring.querySelector('.zchatgpt-context-ring-fill')!.getAttribute('stroke-dasharray')).not.toBe('none');
 });
 
 it('fills the ring from the last runtime report and keeps the numbers in the tooltip only', async () => {
   const { root } = await mountReadyChat({
     usage: {
-      model: 'catalog-default', contextWindow: 128000,
+      model: 'gpt-6-sol', contextWindow: 128000,
       last: { inputTokens: 12345, cachedInputTokens: 0, outputTokens: 300, reasoningOutputTokens: 0, totalTokens: 12645 },
       total: { inputTokens: 12345, cachedInputTokens: 0, outputTokens: 300, reasoningOutputTokens: 0, totalTokens: 12645 },
     },
@@ -632,10 +647,10 @@ it('shows the concrete context report on the ring, only after a request and only
   expect(details.getAttribute('role')).toBe('tooltip');
   expect(details.textContent).toContain('Whole source');
   expect(details.textContent).toContain('2 of 2 pages');
-  expect(details.textContent).toContain('Model window unknown');
-  expect(details.textContent).toContain('Text allowance not asserted');
-  expect(details.textContent).toContain('Fit was not asserted');
-  expect(details.textContent).toContain('All locally extracted authorized text is supplied');
+  expect(details.textContent).toContain('Model window 272,000 tokens (bundled catalog estimate)');
+  expect(details.textContent).toMatch(/Text allowance [0-9,]+ tokens/u);
+  expect(details.textContent).toContain('All authorized source pages fit within the conservative estimate');
+  expect(details.textContent).not.toContain('Model window unknown');
   // The native title would double up with the disclosure on hover, so it is cleared while one exists.
   expect(ring.title).toBe('');
   // Keyboard first: focus opens the same disclosure a pointer gets.
@@ -709,13 +724,13 @@ it('keeps the ring coverage disclosure after a UI-language switch', async () => 
   expect(details.textContent).toContain('已提供页数');
   expect(details.textContent).toContain('2 / 2 页');
   expect(details.textContent).toContain('模型窗口');
-  expect(details.textContent).toContain('未知');
+  expect(details.textContent).toContain('272,000 词元（内置目录估算）');
   expect(details.textContent).toContain('文本配额');
-  expect(details.textContent).toContain('未断言');
-  expect(details.textContent).toContain('未断言是否适配：模型容量或保留的历史记录未知。');
+  expect(details.textContent).toMatch(/文本配额 [0-9,]+ 词元/u);
   expect(details.textContent).toContain('已提供与未提供的内容');
-  // The planner's recorded explanation is data: it stays verbatim, numbers and all.
-  expect(details.textContent).toContain('All locally extracted authorized text is supplied');
+  // The planner's recorded explanation stays verbatim, while the pinned catalog estimate replaces
+  // the old no-capacity disclosure for this model.
+  expect(details.textContent).toContain('All authorized source pages fit within the conservative estimate');
   expect(details.textContent).not.toContain('已经提取');
   // The ring's own accessible name translates too, which is the existing affordance-level proof.
   expect(ring.getAttribute('aria-label')).toMatch(/当前上下文未知/u);
@@ -890,6 +905,24 @@ it('opens a custom model popover instead of three always-visible selects', async
   expect(menu?.querySelector('[data-zchatgpt-picker-section="model"]')?.textContent).toMatch(/Model/u);
   expect(menu?.querySelectorAll('[data-zchatgpt-setting="model"]').length).toBeGreaterThan(0);
   expect(root.querySelectorAll('[data-zchatgpt-picker-menu] select')).toHaveLength(0);
+});
+
+it('renders and selects only the models allowed by current Preferences', async () => {
+  const luna: ModelOption = { ...model, id: 'gpt-6-luna', displayName: 'GPT-6 Luna', isDefault: false };
+  const base = historyWorkspace([]);
+  const workspace: ReaderWorkspace = {
+    ...base,
+    settings: () => Promise.resolve({ ...defaultSettings(), allowedModels: [{ id: 'gpt-6-luna', name: 'GPT-6 Luna' }] }),
+  };
+  const { root, presenter } = await mountReadyChat({ messages: [], workspace, runtimeModels: [model, luna] });
+  const picker = root.querySelector<HTMLButtonElement>('[data-zchatgpt-picker]')!;
+  picker.click();
+  const options = [...root.querySelectorAll<HTMLButtonElement>('[data-zchatgpt-setting="model"]')];
+  expect(options.map(option => option.dataset.zchatgptValue)).toEqual(['gpt-6-luna']);
+  expect(options[0]?.getAttribute('aria-checked')).toBe('true');
+  expect(picker.textContent).toContain('GPT-6 Luna');
+  options[0]!.click();
+  expect(presenter.snapshot().draft.settings?.model).toBe('gpt-6-luna');
 });
 
 it('defaults visible sidebar copy to English', async () => {
@@ -1357,7 +1390,7 @@ it('keeps the composer as one card: textarea, footer chip, and circular arrow se
   expect(bar && picker && bar.contains(picker)).toBe(true);
   expect(bar && send && bar.contains(send)).toBe(true);
   expect(draft && composer && draft.contains(composer)).toBe(true);
-  expect(picker?.textContent).toMatch(/Catalog Default/u);
+  expect(picker?.textContent).toMatch(/GPT-6 Sol/u);
   expect(send?.classList.contains('zchatgpt-send')).toBe(true);
   expect(root.querySelector('.zchatgpt-footnote')).toBeNull();
   expect(root.getAttribute('aria-label')).toBe('Codex');
@@ -2641,11 +2674,11 @@ it('keeps the picker open while effort, speed and model are configured in one vi
   expect(presenter.snapshot().draft.settings?.effort).toBe('high');
   expect(menu.hidden).toBe(false);
   expect(root.ownerDocument.activeElement).toBe(root.querySelector('[data-zchatgpt-setting="effort"][data-zchatgpt-value="high"]'));
-  const model = root.querySelector<HTMLButtonElement>('[data-zchatgpt-setting="model"][data-zchatgpt-value="catalog-default"]')!;
+  const model = root.querySelector<HTMLButtonElement>('[data-zchatgpt-setting="model"][data-zchatgpt-value="gpt-6-sol"]')!;
   model.click();
-  expect(presenter.snapshot().draft.settings?.model).toBe('catalog-default');
+  expect(presenter.snapshot().draft.settings?.model).toBe('gpt-6-sol');
   expect(menu.hidden).toBe(false);
-  expect(root.ownerDocument.activeElement).toBe(root.querySelector('[data-zchatgpt-setting="model"][data-zchatgpt-value="catalog-default"]'));
+  expect(root.ownerDocument.activeElement).toBe(root.querySelector('[data-zchatgpt-setting="model"][data-zchatgpt-value="gpt-6-sol"]'));
   // Only the picker button, an outside click or Escape leaves the menu.
   picker.click();
   expect(menu.hidden).toBe(true);
@@ -2841,7 +2874,7 @@ it('keeps the toolbar explanations described but never printed in the header row
 });
 
 it('opens the paper context details from the More menu and returns focus on Escape', async () => {
-  const { root, presenter } = await mountReadyChat({
+  const { root } = await mountReadyChat({
     messages: [],
     document: { prepare: () => Promise.resolve(documentA), validate: async () => {}, readEnabled: () => true, writeEnabled: () => {} },
   });
@@ -2857,10 +2890,11 @@ it('opens the paper context details from the More menu and returns focus on Esca
   expect(menu.hidden).toBe(true);
   expect(panel.textContent).toContain('Context for the next message');
   expect(panel.textContent).toContain('Synthetic Paper A');
-  // The automatic-PDF state is shown as a fact, never as a fake toggle that is not wired.
-  expect(panel.textContent).toContain('Automatic PDF context');
-  await vi.waitFor(() => expect(presenter.snapshot().document.prepared).not.toBeNull());
-  expect(nextSendSummary(root)).toBe('Current PDF · all 2 pages read locally');
+  // Chat describes the actual bibliography-only send scope and does not expose PDF page controls.
+  expect(panel.textContent).toContain('Automatic paper details and abstract');
+  expect(panel.textContent).toContain('PDF body text is excluded');
+  expect(panel.querySelector('[data-zchatgpt-action="re-read-pdf"]')).toBeNull();
+  expect(nextSendSummary(root)).toBe('Paper details and stored abstract will be included when available · no PDF body text');
   panel.dispatchEvent(new root.ownerDocument.defaultView!.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
   expect(panel.hidden).toBe(true);
   expect(root.ownerDocument.activeElement).toBe(more);

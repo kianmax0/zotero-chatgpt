@@ -62,6 +62,21 @@ it('requires explicit metadata and duplicate choices and sends the selected PDF 
   await vi.waitFor(() => expect(actions.approveSelected).toHaveBeenCalledWith('task-one', ['paper-one'], { 'paper-one': { metadataIndex: 1, duplicateKey: 'EXIST002', downloadPDF: false } }));
 });
 
+it('counts an item saved with its verified PDF as one saved item and one attached PDF', () => {
+  const { container, view } = setup();
+  const original = acquisition();
+  if (original.kind !== 'acquisition') throw new Error('Expected acquisition fixture');
+  const item = original.items[0]!;
+  view.update({ tasks: [{ ...original, state: 'completed', items: [{
+    ...item, status: 'applied', item: duplicate('OUTPUT01'),
+    acquisition: { status: 'attached', attachment: {
+      clientId: paperA.clientId, libraryId: paperA.libraryId, key: 'PDF00001', parentKey: 'OUTPUT01',
+      url: 'https://example.org/article.pdf', contentType: 'application/pdf', sha256: 'a'.repeat(64), contentSignature: 'pdf-readback',
+    }, articleVersion: 'publishedVersion', checkedPages: 1, totalPages: 1 },
+  }] }] });
+  expect(container.querySelector('summary')?.textContent).toContain('1 item saved · 1 PDF attached');
+});
+
 it('shows an additive organization preview for each frozen selected item and approves only checked items', async () => {
   const { container, view, actions, change, action } = setup(); const original = organization(); view.update({ tasks: [original] });
   expect(container.querySelector('summary')!.textContent).toMatch(/Organize library.*2\/2 selected items/iu);
@@ -136,11 +151,14 @@ it('collapses completed metadata-only outcomes and only opens recorded outputs',
   original.state = 'completed'; original.approvedAt = 'approved'; original.items[0]!.status = 'applied'; original.items[0]!.item = duplicate('OUTPUT01'); original.items[0]!.choice = { metadataIndex: 1, downloadPDF: false };
   view.update({ tasks: [original] });
   const card = container.querySelector<HTMLDetailsElement>('[data-zchatgpt-task-id]')!;
-  expect(card.open).toBe(false); expect(card.querySelector('summary')!.textContent).toMatch(/metadata/iu);
+  expect(card.open).toBe(false); expect(card.querySelector('summary')!.textContent).toContain('1 item saved · 0 PDFs attached');
   expect(container.textContent).toMatch(/PDF not requested/iu);
   container.querySelector<HTMLButtonElement>('[data-zchatgpt-task-action="output"]')!.click(); await vi.waitFor(() => expect(actions.openOutput).toHaveBeenCalledWith('task-one', 'paper-one'));
   view.update({ tasks: [{ ...original, revision: 2, state: 'partial', items: [{ ...original.items[0]!, status: 'metadata-only', acquisition: { status: 'unavailable', reason: 'download-failed' } }] }] });
   expect(container.textContent).toMatch(/PDF unavailable/iu); expect(card.open).toBe(true);
+  view.update({ tasks: [{ ...original, revision: 3, state: 'partial', items: [{ ...original.items[0]!, status: 'metadata-only', acquisition: { status: 'uncertain', reason: 'identity-unconfirmed' } }] }] });
+  expect(card.textContent).toContain('PDF unavailable (identity unconfirmed)');
+  expect(card.querySelector('summary')?.textContent).toContain('1 item saved · 0 PDFs attached');
 });
 
 it('treats untrusted task text as inert', () => {

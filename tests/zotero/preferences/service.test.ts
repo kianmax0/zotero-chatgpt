@@ -66,7 +66,7 @@ it('reads the real stored settings as JSON without inventing fields', async () =
   expect(parsed).toEqual(current());
   expect(Object.keys(parsed).sort()).toEqual(['allowedModels', 'preferences', 'profiles', 'schemaVersion', 'skills', 'textScale', 'uiLanguage']);
   // The allowlist crosses the JSON bridge intact so the pane can render the stored selection.
-  expect(parsed.allowedModels?.map(model => model.id)).toEqual(['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna']);
+  expect(parsed.allowedModels?.map(model => model.id)).toEqual(['gpt-6-sol', 'gpt-6-astra', 'gpt-6-luna']);
 });
 
 it('writes a full validated snapshot through saveSettings, including skill activation', async () => {

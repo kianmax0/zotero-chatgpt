@@ -245,16 +245,16 @@ it('stays inside its pane and stops observing after disposal', async () => {
 
 it('localizes completed metadata outcomes, annotation review counts and switches while keeping model captions intact', () => {
   const { root, add } = setup(); const task = add('details', 'zchatgpt-task-card');
-  const summary = add('summary', '', 'Acquire literature · Completed · 2 metadata item(s) · 0 PDFs attached', task);
+  const summary = add('summary', '', 'Acquire literature · Completed · 2 items saved · 0 PDFs attached', task);
   const header = add('div', 'zchatgpt-task-row-header', '', task); const outcome = add('span', 'zchatgpt-task-muted', 'Metadata saved; PDF unavailable (download failed)', header);
   const review = add('button', 'zchatgpt-button', 'Review 3 annotation suggestions'); review.dataset.zchatgptAction = 'review-annotations';
   const speed = add('button', 'zchatgpt-switch'); speed.dataset.zchatgptSetting = 'speed'; speed.setAttribute('aria-label', 'Fast');
   const meta = add('div', 'zchatgpt-message-meta', 'High');
   const locale = mountUILocale(root); locale.update('zh');
-  expect(summary.textContent).toBe('获取文献 · 已完成 · 2 个元数据条目 · 已附加 0 个 PDF');
+  expect(summary.textContent).toBe('获取文献 · 已完成 · 已保存 2 个条目 · 已附加 0 个 PDF');
   expect(outcome.textContent).toBe('元数据已保存；PDF 不可用（下载失败）'); expect(review.textContent).toBe('审核 3 条标注建议');
   expect(speed.getAttribute('aria-label')).toBe('快速'); expect(meta.textContent).toBe('High');
-  locale.update('en'); expect(summary.textContent).toBe('Acquire literature · Completed · 2 metadata item(s) · 0 PDFs attached'); locale.dispose();
+  locale.update('en'); expect(summary.textContent).toBe('Acquire literature · Completed · 2 items saved · 0 PDFs attached'); locale.dispose();
 });
 
 it('localizes the Chat / Agent mode selector while keeping the product term and pressed state', () => {

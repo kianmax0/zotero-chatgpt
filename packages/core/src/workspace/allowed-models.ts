@@ -9,41 +9,30 @@ import { PINNED_MODEL_CATALOG } from '../../../../runtime/model-capabilities.ts'
  * Preferences pane renders, and the resolver the picker consumes. It deliberately lives in core so
  * the store, the pane and the composer all agree without a second list.
  *
- * Two sources feed the offerable set, and both are id-driven:
- *
- * - The pinned catalog embedded in the runtime binary (GPT-6 and GPT-5.6 today), which is available
- *   even before the runtime starts because the Preferences window can be opened first.
- * - The runtime's live `model/list`, which is the only source that can report the GPT-5.3 Spark
- *   family. Those ids are not in the bundled catalog; they become selectable once the runtime
- *   reports them and are then persisted in the allowlist so they keep working.
- *
- * The pane never invents an id: with no live list it shows only the bundled families and says the
- * Spark models come from the runtime. Excluded families (GPT-5.5, GPT-5.4, GPT-5.2, the daybreak
- * ids and the auto-review agent) never become candidates, however they arrive.
+ * The picker offers only the three current GPT-6 ids. A pinned catalog entry can be offered before
+ * the runtime starts; Sol and Luna join only after the live `model/list` reports their exact ids.
+ * Historical stored ids remain in settings but never become new picker choices.
  */
 
 /** Exact model-id shape: runtime ids contain `.`, `-` and `_`, so the skill `identifier` shape is too strict. */
 export const MODEL_ID = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/u;
 
 /**
- * Family membership is derived from the exact reported id, never from a per-family list of guessed
- * ids. The boundary group keeps near misses (`gpt-60`, `gpt-5.60-sol`) out, and the Spark marker is
- * required for GPT-5.3 so a plain `gpt-5.3` or `gpt-5.3-codex` is not offered.
+ * This intentionally accepts exact ids only. A family prefix is too broad for a deliberately small
+ * picker and could surface retired or internal models when the runtime catalog changes.
  */
-const BUNDLED_FAMILY = /^gpt-(?:6|5\.6)(?:$|[-.])/u;
-const SPARK_FAMILY = /^gpt-5\.3(?:$|[-.])/u;
-const SPARK_MARKER = /spark/iu;
+export const CURRENT_MODEL_IDS = ['gpt-6-sol', 'gpt-6-astra', 'gpt-6-luna'] as const;
+const CURRENT_MODEL_RANK = new Map<string, number>(CURRENT_MODEL_IDS.map((id, index) => [id, index]));
 
-/** True for exactly the ids the allowlist may offer: GPT-6, GPT-5.6, and the GPT-5.3 Spark family. */
+/** True for exactly the current models the picker may offer. */
 export function isOfferableModelId(id: string): boolean {
-  return BUNDLED_FAMILY.test(id) || (SPARK_FAMILY.test(id) && SPARK_MARKER.test(id));
+  return CURRENT_MODEL_RANK.has(id);
 }
 
 /**
- * True for the historical picker families (GPT-6 / GPT-5.6) only. The composer keeps the family rule
- * as its fallback when an allowlist leaves nothing offerable; the Spark family is allowlist-only.
+ * Compatibility alias for callers that used the older bundled-family predicate.
  */
-export function isBundledFamilyModelId(id: string): boolean { return BUNDLED_FAMILY.test(id); }
+export function isBundledFamilyModelId(id: string): boolean { return isOfferableModelId(id); }
 
 const ACRONYMS: Readonly<Record<string, string>> = { gpt: 'GPT', ai: 'AI' };
 function titleCase(part: string): string {
@@ -62,64 +51,52 @@ export function modelLabel(id: string): string {
 }
 
 /**
- * The default allowlist: GPT-6-Astra plus the GPT-5.6 family, exactly the set the composer offered
- * before this setting existed (see `chat/generation-settings.ts`). Newest first.
+ * Default to the three current models. Sol is preferred for new conversations; Astra is a pinned
+ * fallback and Luna is runtime-discovered when available.
  */
-export const DEFAULT_ALLOWED_MODEL_IDS: readonly string[] = ['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna'];
+export const DEFAULT_ALLOWED_MODEL_IDS: readonly string[] = CURRENT_MODEL_IDS;
+/** Default model set persisted by earlier plugin builds; treated as untouched but never re-offered. */
+export const LEGACY_DEFAULT_ALLOWED_MODEL_IDS: readonly string[] = ['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna'];
 export function defaultAllowedModels(): AllowedModel[] {
   return DEFAULT_ALLOWED_MODEL_IDS.map(id => ({ id, name: modelLabel(id) }));
 }
 
 /**
- * The picker's ordering: the pinned newest-first rank leads, then everything else by id, so a new
- * sibling of either family cannot silently land ahead of the pinned newest model and the server's
- * array order is never trusted. (`gpt-6-astra` is first regardless of how the runtime pages the
- * catalog.)
+ * The picker ordering is product-owned and independent of the runtime's array order.
  */
-function offerRank(id: string): number {
-  const index = DEFAULT_ALLOWED_MODEL_IDS.indexOf(id);
-  return index === -1 ? DEFAULT_ALLOWED_MODEL_IDS.length : index;
-}
-function compareOfferRank(a: string, b: string): number { return offerRank(a) - offerRank(b) || a.localeCompare(b); }
+function compareOfferRank(a: string, b: string): number { return (CURRENT_MODEL_RANK.get(a) ?? CURRENT_MODEL_IDS.length) - (CURRENT_MODEL_RANK.get(b) ?? CURRENT_MODEL_IDS.length) || a.localeCompare(b); }
 /**
  * The exact ids the composer may offer from a live catalog, newest-first. This is the whole offer
  * policy in one place — which ids are eligible, their order, and what happens when a stored list has
  * nothing offerable left:
  *
- * - With an enforced allowlist, exactly the catalog ids it names, in rank order (including ids
- *   outside the historical families).
- * - Otherwise the historical GPT-6 / GPT-5.6 family rule, in rank order.
- * - A list whose ids have all left the live catalog degrades to the family rule rather than blanking
- *   a working picker; only when even that yields nothing is the raw catalog order kept.
+ * - With an enforced allowlist, exactly the named current ids present in the live catalog.
+ * - Otherwise the current GPT-6 list, in product rank order.
+ * - A stale list degrades only to current models still present in the live catalog. Older or
+ *   unrecognized catalog entries are never used as a blank-picker fallback.
  *
  * The composer renders this list and nothing else; the stored record is never rewritten here.
  */
 export function offeredModelIds(catalogIds: readonly string[], allowedIds?: readonly string[]): string[] {
   const ranked = (ids: readonly string[]): string[] => [...ids].sort(compareOfferRank);
+  const current = catalogIds.filter(isOfferableModelId);
   if (allowedIds !== undefined) {
-    const offered = catalogIds.filter(id => allowedIds.includes(id));
+    const offered = current.filter(id => allowedIds.includes(id));
     if (offered.length) return ranked(offered);
   }
-  const family = catalogIds.filter(isBundledFamilyModelId);
-  return family.length ? ranked(family) : [...catalogIds];
+  return ranked(current);
 }
 
 export interface ModelCandidate { id: string; name: string }
 
 /**
- * Every model the pane may offer, in a stable order: the bundled catalog's offerable families first
- * (newest listed first), then any runtime-reported id in those families that the catalog lacks — in
- * practice the GPT-5.3 Spark models. Excluded families are filtered out on both paths, and an id is
- * never repeated, so a live list that echoes a catalog id does not duplicate a row.
+ * Every model the pane may offer: pinned current ids plus exact current ids from the live runtime.
+ * Server ordering is ignored and duplicates are removed.
  */
 export function modelCandidates(liveModelIds: readonly string[] = []): ModelCandidate[] {
-  const ids = Object.keys(PINNED_MODEL_CATALOG.models).filter(isOfferableModelId);
-  const known = new Set(ids);
-  for (const id of liveModelIds) {
-    if (known.has(id) || !isOfferableModelId(id)) continue;
-    known.add(id);
-    ids.push(id);
-  }
+  const available = new Set(Object.keys(PINNED_MODEL_CATALOG.models).filter(isOfferableModelId));
+  for (const id of liveModelIds) if (isOfferableModelId(id)) available.add(id);
+  const ids = CURRENT_MODEL_IDS.filter(id => available.has(id));
   return ids.map(id => ({ id, name: modelLabel(id) }));
 }
 
@@ -134,17 +111,17 @@ export function allowedModelIds(allowedModels: readonly AllowedModel[] | undefin
 }
 
 /**
- * The ids a stored record must keep even though this build cannot offer them (a family the owner
- * saved before it was excluded): stored, de-duplicated, in stored order. The pane has no row for
- * these, so a save must carry them through instead of dropping them; they are never offered.
+ * Stored ids absent from the currently available candidate set, in stored order. The pane has no
+ * row for these, so a save carries them through rather than silently dropping historical settings.
  */
-export function unofferableAllowedModelIds(allowedModels: readonly AllowedModel[] | undefined): string[] {
-  return allowedModelIds(allowedModels).filter(id => !isOfferableModelId(id));
+export function unofferableAllowedModelIds(allowedModels: readonly AllowedModel[] | undefined, liveModelIds: readonly string[] = []): string[] {
+  const available = new Set(modelCandidates(liveModelIds).map(candidate => candidate.id));
+  return allowedModelIds(allowedModels).filter(id => !available.has(id));
 }
 
 /**
- * The models the picker may offer from a runtime catalog: the offerable allowed ids the catalog
- * contains, in the catalog's own order. Pure, so it can be unit-tested without a runtime.
+ * The models the picker may offer from a runtime catalog: current allowed ids present in that
+ * catalog. Pure, so it can be unit-tested without a runtime.
  */
 export function resolveAllowedModels(models: readonly ModelOption[], allowedModels: readonly AllowedModel[] | undefined): ModelOption[] {
   const allowed = new Set(allowedModelIds(allowedModels).filter(isOfferableModelId));
@@ -152,23 +129,21 @@ export function resolveAllowedModels(models: readonly ModelOption[], allowedMode
 }
 
 /**
- * True while the stored list is still exactly the untouched default. This is what keeps the
- * historical GPT-6 / GPT-5.6 family rule in force for anyone who never opened the setting —
- * including a family sibling the pinned catalog does not list — while an edited list becomes
- * authoritative over the picker.
+ * True while the stored list is either current default or the exact legacy default. Existing
+ * installs keep their stored bytes and IDs, while both defaults select the current offered set.
  */
 export function isDefaultAllowedModels(allowedModels: readonly AllowedModel[] | undefined): boolean {
   if (allowedModels === undefined) return true;
   const ids = allowedModelIds(allowedModels);
-  return ids.length === DEFAULT_ALLOWED_MODEL_IDS.length && DEFAULT_ALLOWED_MODEL_IDS.every(id => ids.includes(id));
+  const sameSet = (expected: readonly string[]): boolean => ids.length === expected.length && expected.every(id => ids.includes(id));
+  return sameSet(DEFAULT_ALLOWED_MODEL_IDS) || sameSet(LEGACY_DEFAULT_ALLOWED_MODEL_IDS);
 }
 
 /**
  * The allowlist the picker should enforce: `undefined` while the stored list is the untouched
- * default (so the pre-existing family rule stays exactly as it was), otherwise the offerable ids to
- * offer. A stale id the picker no longer offers is filtered out, and a list with nothing offerable
- * left degrades to `undefined` — the family default — rather than blanking the picker or letting an
- * excluded family back in. The stored record itself is never rewritten by this call.
+ * default (so current and legacy defaults both select all available current models), otherwise the
+ * offerable ids to offer. A stale list that has no current IDs degrades to the current available set
+ * rather than blanking the picker. The stored record itself is never rewritten by this call.
  */
 export function enforcedAllowedModelIds(allowedModels: readonly AllowedModel[] | undefined): string[] | undefined {
   if (isDefaultAllowedModels(allowedModels)) return undefined;
@@ -177,19 +152,9 @@ export function enforcedAllowedModelIds(allowedModels: readonly AllowedModel[] |
 }
 
 /**
- * The union of the offerable bundled candidates, any offerable id the runtime reports, and any
- * saved offerable id neither source lists (for example a Spark selection saved before the runtime
- * stopped), in a stable order. The pane renders exactly these rows; a stored id from an excluded
- * family is never resurrected here, but `allowedModelIds` still preserves it in the record.
+ * Pinned and live-reported current candidates. Saved ids are deliberately not candidates: a model
+ * absent from both sources is stale and must not appear selectable.
  */
-export function modelChoices(allowedModels: readonly AllowedModel[] | undefined, liveModelIds: readonly string[] = []): ModelCandidate[] {
-  const candidates = modelCandidates(liveModelIds);
-  const known = new Set(candidates.map(candidate => candidate.id));
-  const extras: ModelCandidate[] = [];
-  for (const model of allowedModels ?? []) {
-    if (!isOfferableModelId(model.id) || known.has(model.id)) continue;
-    known.add(model.id);
-    extras.push({ id: model.id, name: modelLabel(model.id) });
-  }
-  return [...candidates, ...extras];
+export function modelChoices(_allowedModels: readonly AllowedModel[] | undefined, liveModelIds: readonly string[] = []): ModelCandidate[] {
+  return modelCandidates(liveModelIds);
 }

@@ -35,8 +35,9 @@ function validateResponse(value) {
     return { status: 'blocked', reason: allowed.includes(value.reason) ? value.reason : 'invalid-response', ...(marker ? { marker } : {}) };
   }
   if (value.status === 'prepared' && typeof value.text === 'string' && value.text.length <= MAX_PREPARED
+      && typeof value.hasAutomaticContext === 'boolean'
       && typeof value.marker === 'string' && MARKER.test(value.marker)) {
-    return { status: 'prepared', text: value.text, marker: value.marker };
+    return { status: 'prepared', text: value.text, hasAutomaticContext: value.hasAutomaticContext, marker: value.marker };
   }
   return { status: 'blocked', reason: 'invalid-response' };
 }
@@ -83,7 +84,7 @@ export class ZoteroChatGPTOfficialChatParent extends JSWindowActorParent {
         detail: { kind: 'prepare', binding, transaction, question, respond: finish },
       }));
     });
-    // Navigation, window replacement or a reader switch while PDF preparation awaited invalidates
+    // Navigation, window replacement or a reader switch while metadata was read invalidates
     // the response. The content actor cannot choose a different recipient.
     if (browser !== browserFor(this.browsingContext, manager) || browser.getAttribute('data-zchatgpt-embed-binding') !== binding) {
       return { status: 'blocked', reason: 'context-changed' };

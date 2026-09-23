@@ -22,7 +22,7 @@ async function runHostSmoke(config) {
       const record = JSON.parse(await IOUtils.readUTF8(file));
       for (const request of record.requests ?? []) {
         const user = (record.messages ?? []).find(message => message.role === 'user' && message.requestId === request.requestId);
-        rows.push({ requestId: request.requestId, state: request.state, workflow: user?.workflow?.skill?.workflow ?? null });
+        rows.push({ requestId: request.requestId, state: request.state, workflow: user?.workflow?.skill?.workflow ?? null, model: user?.settings?.model ?? null });
       }
     }
     return rows;
@@ -55,6 +55,18 @@ async function runHostSmoke(config) {
     if (panel().dataset.zchatgptAuth !== 'signedIn') { report.status = 'blocked'; report.blockedStage = 'official-agent-login'; report.finishedAt = new Date().toISOString(); await save(); return; }
     await delay(2500); const afterLogin = await requestSnapshot();
     await check('login-starts-no-incidental-request', afterLogin.length === beforeLogin.length, { before: beforeLogin.length, after: afterLogin.length });
+    // Live acceptance must use the workhorse/efficient models, never the most costly Astra fallback.
+    const picker = panel().querySelector('[data-zchatgpt-picker]');
+    click(picker);
+    const lowCostModel = await until(() => panel()?.querySelector('[data-zchatgpt-setting="model"][data-zchatgpt-value="gpt-6-sol"]')
+      || panel()?.querySelector('[data-zchatgpt-setting="model"][data-zchatgpt-value="gpt-6-luna"]'), 'sol-or-luna-model-option', 10000).catch(() => null);
+    if (!lowCostModel || lowCostModel.disabled) {
+      report.status = 'blocked'; report.blockedStage = 'sol-or-luna-model-unavailable'; report.finishedAt = new Date().toISOString(); await save(); return;
+    }
+    click(lowCostModel);
+    report.testModel = lowCostModel.dataset.zchatgptValue;
+    await check('low-cost-test-model-selected', report.testModel === 'gpt-6-sol' || report.testModel === 'gpt-6-luna', { model: report.testModel });
+    if (picker.getAttribute('aria-expanded') === 'true') click(picker);
     const baselineIDs = new Set(afterLogin.map(request => request.requestId));
     const taskCard = label => [...panel().querySelectorAll('[data-zchatgpt-task-id]')].find(card => String(card.querySelector('summary')?.textContent ?? '').includes(label));
     const send = async (question, label, afterClick) => {
@@ -86,7 +98,7 @@ async function runHostSmoke(config) {
     peer.addTag(laterTag); await peer.saveTx({ skipSelect: true }); organizationCard.open = true; click(organizationCard.querySelector('[data-zchatgpt-task-action="undo"]')); await until(() => organizationCard.dataset.state === 'conflict', 'organization-undo-conflict', 60000); await Promise.all([parent.loadAllData(), peer.loadAllData()]);
     await check('organization-undo-preserves-later-edit', !tags(parent).includes(proposedTag) && !collections(parent).includes(target.key) && tags(peer).includes(proposedTag) && tags(peer).includes(laterTag) && collections(peer).includes(target.key));
     const finalRequests = await requestSnapshot(); const issued = finalRequests.filter(request => !baselineIDs.has(request.requestId)); const workflows = issued.map(request => request.workflow).sort();
-    await check('exactly-two-authorized-model-requests', report.modelTurnsStarted === 2 && issued.length === 2 && issued.every(request => request.state === 'completed') && JSON.stringify(workflows) === JSON.stringify(['annotate', 'organize']), { modelTurnsStarted: report.modelTurnsStarted, requests: issued });
+    await check('exactly-two-authorized-model-requests', report.modelTurnsStarted === 2 && issued.length === 2 && issued.every(request => request.state === 'completed' && request.model === report.testModel) && JSON.stringify(workflows) === JSON.stringify(['annotate', 'organize']), { modelTurnsStarted: report.modelTurnsStarted, requests: issued });
     report.status = 'passed'; report.finishedAt = new Date().toISOString(); await save();
   } catch (error) {
     report.status = 'failed'; report.failedStep = step; report.failureClass = String(error?.name ?? 'Error').slice(0, 80); report.finishedAt = new Date().toISOString();

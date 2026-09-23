@@ -14,7 +14,7 @@ const uuid = () => `00000000-0000-4000-8000-${String(++ids).padStart(12, '0')}`;
 const requestId = (n: number) => `11111111-0000-4000-8000-${String(n).padStart(12, '0')}`;
 async function setup(configure?: (s: ReturnType<typeof server>) => void, storage = new MemoryStorage(), options: Pick<ReaderOptions, 'generatedImage'> = {}) {
   const s = server(); configure?.(s);
-  const c = await createReaderClient(s.p, storage, { codexVersion: '0.154.0', cwd: '/isolated', uuid, loginTimeoutMs: 1000, deltaFlushMs: 1, now: () => '2026-09-09T08:00:00.000Z', ...options }); clients.push(c);
+  const c = await createReaderClient(s.p, storage, { codexVersion: '0.156.1', cwd: '/isolated', uuid, loginTimeoutMs: 1000, deltaFlushMs: 1, now: () => '2026-09-09T08:00:00.000Z', ...options }); clients.push(c);
   const events: ReaderEvent[] = []; c.subscribe(e => events.push(e));
   return { ...s, storage, c, events };
 }
@@ -265,17 +265,22 @@ describe('runtime handshake and policy', () => {
     if (violation === 'foreign-user-layer') fixture.layers[1]!.name.file = '/outside/config.toml';
     if (violation === 'unknown-origin') fixture.origins.approval_policy!.name.type = 'enterpriseManaged';
     s.handlers.set('config/read', () => violation === 'missing-layers' ? { ...fixture, layers: null } : violation === 'chatgpt-base-url' ? { ...fixture, config: { ...fixture.config, chatgpt_base_url: 'https://example.test/' } } : fixture);
-    const options = { codexVersion: '0.154.0', cwd: '/isolated', uuid, ...(violation === 'home-mismatch' ? { codexHome: '/isolated/other-account' } : {}) };
+    const options = { codexVersion: '0.156.1', cwd: '/isolated', uuid, ...(violation === 'home-mismatch' ? { codexHome: '/isolated/other-account' } : {}) };
     const client = await createReaderClient(s.p, new MemoryStorage(), options); clients.push(client);
     // The policy read happens on the first Agent request, not at construction.
     await expect(client.refreshAccount()).rejects.toThrow('policy');
     expect(s.p.terminated).toBe(true); expect(methods(s.p)).not.toContain('account/read');
   });
   it('does not accept the expected version only inside a client-supplied user-agent suffix', async () => {
-    const s = server(); s.handlers.set('initialize', () => ({ userAgent: 'codex/9.0.0 (zchatgpt; 0.154.0)', codexHome: '/isolated', platformFamily: 'unix', platformOs: 'macos' }));
-    const client = await createReaderClient(s.p, new MemoryStorage(), { codexVersion: '0.154.0', cwd: '/isolated', uuid }); clients.push(client);
+    const s = server(); s.handlers.set('initialize', () => ({ userAgent: 'codex/9.0.0 (zchatgpt; 0.156.1)', codexHome: '/isolated', platformFamily: 'unix', platformOs: 'macos' }));
+    const client = await createReaderClient(s.p, new MemoryStorage(), { codexVersion: '0.156.1', cwd: '/isolated', uuid }); clients.push(client);
     await expect(client.refreshAccount()).rejects.toThrow('version');
     expect(s.p.terminated).toBe(true);
+  });
+  it('rejects the previous pinned runtime version before connecting', async () => {
+    const s = server();
+    await expect(createReaderClient(s.p, new MemoryStorage(), { codexVersion: '0.154.0', cwd: '/isolated', uuid })).rejects.toThrow('Unsupported runtime version');
+    expect(methods(s.p)).toEqual([]);
   });
   it('latches overflow once and stops the transport', async () => {
     const { c, p } = await setup(); await c.refreshAccount(); let terminations = 0; const terminate = p.terminate.bind(p); p.terminate = () => { terminations++; return terminate(); };
@@ -534,7 +539,7 @@ describe('attachment conversations', () => {
     const report = await c.diagnostics(explain(1).conversationId);
     expect(report).toMatchObject({
       pluginVersion: '0.1.0',
-      runtimeVersion: '0.154.0',
+      runtimeVersion: '0.156.1',
       errorCode: null,
       requestCount: 1,
       storageLocation: 'Zotero profile/zotero-chatgpt/v1/records',
@@ -557,7 +562,7 @@ describe('attachment conversations', () => {
   });
   it('exposes honest accept, first-text and settle times without claiming completion early', async () => {
     const s = server(); const storage = new MemoryStorage(); let current = '2026-09-09T08:00:00.000Z';
-    const c = await createReaderClient(s.p, storage, { codexVersion: '0.154.0', cwd: '/isolated', uuid, loginTimeoutMs: 1000, deltaFlushMs: 1, now: () => current }); clients.push(c);
+    const c = await createReaderClient(s.p, storage, { codexVersion: '0.156.1', cwd: '/isolated', uuid, loginTimeoutMs: 1000, deltaFlushMs: 1, now: () => current }); clients.push(c);
     await c.refreshAccount();
     const conversation = await c.current(paperA, 'Scheduled timing');
     const input: SendInput = { requestId: requestId(801), conversationId: conversation.id, action: 'explain', question: '', citations: [citationA], settings, mode: 'agent' };
@@ -588,7 +593,7 @@ describe('attachment conversations', () => {
 
   it('records reasoning output as turn liveness and pings progress at most once per second, never as answer text', async () => {
     const s = server(); const storage = new MemoryStorage(); let current = '2026-09-09T08:00:00.000Z';
-    const c = await createReaderClient(s.p, storage, { codexVersion: '0.154.0', cwd: '/isolated', uuid, loginTimeoutMs: 1000, deltaFlushMs: 1, now: () => current }); clients.push(c);
+    const c = await createReaderClient(s.p, storage, { codexVersion: '0.156.1', cwd: '/isolated', uuid, loginTimeoutMs: 1000, deltaFlushMs: 1, now: () => current }); clients.push(c);
     const events: ReaderEvent[] = []; c.subscribe(e => events.push(e));
     await c.refreshAccount();
     const conversation = await c.current(paperA, 'Reasoning liveness');
@@ -637,7 +642,7 @@ describe('attachment conversations', () => {
 
   it('throttles progress per run, so a second request pings immediately instead of inheriting the window', async () => {
     const s = server(); const storage = new MemoryStorage(); let current = '2026-09-09T08:00:00.000Z';
-    const c = await createReaderClient(s.p, storage, { codexVersion: '0.154.0', cwd: '/isolated', uuid, loginTimeoutMs: 1000, deltaFlushMs: 1, now: () => current }); clients.push(c);
+    const c = await createReaderClient(s.p, storage, { codexVersion: '0.156.1', cwd: '/isolated', uuid, loginTimeoutMs: 1000, deltaFlushMs: 1, now: () => current }); clients.push(c);
     const events: ReaderEvent[] = []; c.subscribe(e => events.push(e));
     await c.refreshAccount();
     const conversation = await c.current(paperA, 'Per-run throttle');

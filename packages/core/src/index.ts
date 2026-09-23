@@ -26,7 +26,7 @@ export interface ReaderOptions { codexVersion: string; cwd: string; uuid: () => 
  */
 export function createReaderClient(processOrConnect: ManagedProcess | ConnectCodex, storage: StoragePort, options: ReaderOptions): Promise<ReaderClient> {
   // macOS uses the pinned bundled runtime; Linux uses the system CLI and reports `system` here.
-  if ((options.codexVersion !== '0.154.0' && options.codexVersion !== 'system') || !options.cwd) return Promise.reject(new RuntimeFailure('Unsupported runtime version or directory'));
+  if ((options.codexVersion !== '0.156.1' && options.codexVersion !== 'system') || !options.cwd) return Promise.reject(new RuntimeFailure('Unsupported runtime version or directory'));
   const connect: ConnectCodex = typeof processOrConnect === 'function'
     ? processOrConnect
     : () => openCodexConnection(processOrConnect, { codexVersion: options.codexVersion, cwd: options.cwd, ...(options.pluginVersion ? { pluginVersion: options.pluginVersion } : {}), ...(options.codexHome ? { codexHome: options.codexHome } : {}) });

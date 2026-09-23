@@ -35,7 +35,6 @@ const COPY: Readonly<Record<string, string>> = {
   'More actions': '更多操作',
   'Paper & context details': '文献与上下文详情',
   'Allow PDF context': '允许 PDF 上下文',
-  'Allow PDF context and send': '允许 PDF 上下文并发送',
   'Conversation actions': '对话操作',
   'Delete local conversation…': '删除本地对话…',
   'Delete this local conversation? Its messages and unsent draft are removed from this computer. The official ChatGPT conversation, the paper and native annotations are not touched.': '删除此本地对话？其消息与未发送的草稿将从此电脑移除。官方 ChatGPT 对话、文献和原生标注不受影响。',
@@ -46,17 +45,17 @@ const COPY: Readonly<Record<string, string>> = {
   'Copying the PDF file is unavailable here.': '此处无法复制 PDF 文件。',
   'This attachment has no local PDF file to copy.': '此附件没有可复制的本地 PDF 文件。',
   'The PDF file could not be copied.': '无法复制该 PDF 文件。',
-  'When you send in official ChatGPT, locally extracted text from the current PDF and the current Zotero selection are added to that message. Nothing is sent when you open the sidebar. You can turn this off in Zotero Preferences.': '在官方 ChatGPT 中发送时，插件会把当前 PDF 在本地提取的文本和当前 Zotero 选区加入这条消息。打开侧栏不会发送任何内容。你可以在 Zotero 偏好设置中关闭此功能。',
-  'Preparing frozen current PDF context. Nothing has been sent yet.': '正在冻结当前 PDF 上下文，尚未发送任何内容。',
-  'ChatGPT accepted this message with the frozen current PDF context.': 'ChatGPT 已接收这条消息及冻结的当前 PDF 上下文。',
+  'When you send in official ChatGPT, the paper title, authors, publication, year, DOI and stored abstract are added when available. PDF body text is not added. A passage you explicitly select is included separately. Opening the sidebar sends nothing. You can turn automatic paper context off in Zotero Preferences.': '在官方 ChatGPT 中发送时，插件会在可用时加入文献标题、作者、发表信息、年份、DOI 和已保存的摘要。不会加入 PDF 正文。你明确选择的段落会单独加入。打开侧栏不会发送任何内容。你可以在 Zotero 偏好设置中关闭自动文献信息上下文。',
+  'Preparing frozen paper metadata and any explicit selection. Nothing has been sent yet.': '正在准备冻结的文献信息和明确选择的段落，尚未发送任何内容。',
+  'ChatGPT accepted this message with bibliographic paper context and any explicit selection.': 'ChatGPT 已接收这条消息，其中包含文献信息上下文和明确选择的段落（如有）。',
   'ChatGPT did not confirm that this message was accepted. It was not sent again.': 'ChatGPT 未确认已接收这条消息，插件没有再次发送。',
-  'ChatGPT accepted this message without PDF context because automatic PDF context is off.': '自动 PDF 上下文已关闭；ChatGPT 已接收这条不含 PDF 上下文的消息。',
-  'The PDF context could not be frozen. Your ChatGPT draft was kept and was not sent.': '无法冻结 PDF 上下文。ChatGPT 草稿已保留，未发送。',
+  'ChatGPT accepted this message without automatic paper context; an explicit selection may still be included.': '自动文献信息上下文已关闭；ChatGPT 已接收这条消息。消息仍可能包含你明确选择的段落。',
+  'The paper metadata could not be read. Your ChatGPT draft was kept and was not sent.': '无法读取文献信息。ChatGPT 草稿已保留，未发送。',
   'The official ChatGPT composer is unavailable. Your draft was kept and was not sent.': '官方 ChatGPT 输入框不可用。草稿已保留，未发送。',
   'The selection was inserted in the ChatGPT draft. It has not been sent.': '选中内容已插入 ChatGPT 草稿，尚未发送。',
-  'Sign in to official ChatGPT. Automatic PDF context will start only after its supported composer is available.': '请登录官方 ChatGPT。只有检测到受支持的输入框后，自动 PDF 上下文才会启用。',
-  'Automatic PDF context is blocked because this ChatGPT page does not expose the supported composer. No question can be sent from this surface.': '此 ChatGPT 页面未提供受支持的输入框，自动 PDF 上下文已阻止发送；此界面不会发送任何问题。',
-  'Automatic PDF context is blocked because the official ChatGPT send control is unsupported. Your draft was kept and was not sent.': '官方 ChatGPT 发送控件不受支持，自动 PDF 上下文已阻止发送。草稿已保留，未发送。',
+  'Sign in to official ChatGPT. Automatic paper context will be included only after its supported composer is available.': '请登录官方 ChatGPT。只有检测到受支持的输入框后，才会加入自动文献信息上下文。',
+  'Automatic paper context is blocked because this ChatGPT page does not expose the supported composer. No question can be sent from this surface.': '此 ChatGPT 页面未提供受支持的输入框，自动文献信息上下文已阻止发送；此界面不会发送任何问题。',
+  'Automatic paper context is blocked because the official ChatGPT send control is unsupported. Your draft was kept and was not sent.': '官方 ChatGPT 发送控件不受支持，自动文献信息上下文已阻止发送。草稿已保留，未发送。',
   'Four paper ChatGPT sessions already contain drafts or work. Finish or clear one before opening another.': '已有四个论文 ChatGPT 会话包含草稿或进行中的工作。请先完成或清空其中一个，再打开新会话。',
   'Complete sign-in on the official account page. PDF context is disabled until ChatGPT returns.': '请在官方账户页面完成登录。返回 ChatGPT 前，PDF 上下文功能保持关闭。',
   Recorded: '已记录', Stopped: '已停止', Failed: '失败', Queued: '已排队', 'Cancelled before sending': '发送前已取消',
@@ -90,11 +89,17 @@ const COPY: Readonly<Record<string, string>> = {
   'Target collection': '目标分类', 'Choose a collection…': '选择分类…', 'Preview image': '预览图片',
   'Image preview': '图片预览', 'Close image preview': '关闭图片预览', 'Save image…': '保存图片…',
   'Move image earlier': '将图片前移',
-  'Use current PDF text automatically': '自动使用当前 PDF 文本',
+  'Use current paper context automatically': '自动使用当前文献信息上下文',
   'New agent': '新建 Agent 会话',
   // Context details (UI-02/UI-03). Dynamic sentences with counts are handled by `progress()`; these
   // are the fixed phrases. The one-line summary lives in the details now, not in a permanent row.
   'Automatic PDF context is off': '自动 PDF 上下文已关闭',
+  'Automatic paper context is off': '自动文献信息上下文已关闭',
+  'Paper details and stored abstract will be included when available · no PDF body text': '可用时会加入文献信息和已保存的摘要 · 不包含 PDF 正文',
+  'Automatic paper details and abstract': '自动文献信息和摘要',
+  'Automatic PDF text': '自动 PDF 文本',
+  'Chat sends available bibliography and stored abstract. PDF body text is excluded; explicitly selected text is included separately.': 'Chat 会发送可用的文献信息和已保存的摘要，不会发送 PDF 正文；明确选择的文本会单独加入。',
+  'Chat does not send PDF body text. Paper details and the stored abstract are included when available.': 'Chat 不会发送 PDF 正文；可用时会加入文献信息和已保存的摘要。',
   'PDF text unavailable': 'PDF 文本不可用',
   'Current PDF · text not prepared yet': '当前 PDF · 文本尚未准备',
   'No PDF context': '没有 PDF 上下文',
@@ -118,7 +123,8 @@ const COPY: Readonly<Record<string, string>> = {
   'Organize selected items': '整理选中条目',
   'Uses the selection in the Zotero main window': '使用 Zotero 主窗口中的选中条目',
   'Draft prepared below. Nothing has been sent.': '草稿已准备在下方，尚未发送任何内容。',
-  'When you send, extracted text from this PDF, your selected text and attached images go to Codex through your ChatGPT account. Opening this sidebar only prepares local text. You can turn automatic PDF text off in Zotero\'s Preferences window.': '发送时，此 PDF 的提取文本、选中文本和附加图片将通过你的 ChatGPT 账户发送至 Codex。打开侧栏仅会在本地准备文本。你可以在 Zotero 的偏好设置窗口中关闭自动使用 PDF 文本。',
+  'When you send in Agent, the full PDF text, your selected text and attached images go to Codex through your ChatGPT account. Opening this sidebar only prepares local text. You can turn automatic source context off in Zotero Preferences.': '在 Agent 中发送时，此 PDF 的全文、选中文本和附加图片将通过你的 ChatGPT 账户发送至 Codex。打开侧栏仅会在本地准备文本。你可以在 Zotero 偏好设置中关闭自动来源上下文。',
+  'Allow PDF context and send': '允许 PDF 上下文并发送',
   'This action could not be completed.': '此操作未能完成。',
   'The source could not be opened.': '无法打开原文。',
   'The image could not be saved.': '无法保存图片。',
@@ -180,7 +186,7 @@ const COPY: Readonly<Record<string, string>> = {
   Details: '详情',
   'Agent instructions': 'Agent 指令',
   Models: '模型',
-  'Checked models are offered in Agent requests; the exact id is what is sent. Source: the bundled catalog, not your account\'s live entitlements, plus any GPT-5.3-Spark the running runtime reports.': '勾选的模型会在 Agent 请求中提供；右侧确切 id 就是实际发送的 id。来源：随包目录（并非你账户的实时权限），外加正在运行的运行时报告的任何 GPT-5.3-Spark。',
+  'Checked models are offered in Agent requests; the exact id is what is sent. Source: the bundled catalog, not your account\'s live entitlements.': '勾选的模型会在 Agent 请求中提供；右侧确切 id 就是实际发送的 id。来源：随包目录，并非你账户的实时权限。',
   'Checked models are offered in Agent requests; the exact id is what is sent. Source: the running runtime\'s report plus the bundled catalog.': '勾选的模型会在 Agent 请求中提供；右侧确切 id 就是实际发送的 id。来源：正在运行的运行时的报告与随包目录。',
   'Applies only to Agent requests.': '仅用于 Agent 请求。',
   'Chat opens the official ChatGPT website in the sidebar. Its account, models, conversations and limits are managed by ChatGPT, not by this plugin.': 'Chat 会在侧栏中打开官方 ChatGPT 网站。其账户、模型、对话与限额由 ChatGPT 管理，不由本插件管理。',
@@ -278,7 +284,7 @@ function progress(text: string): string {
   if (match) return `回答用时 ${match[1]} 秒`;
   match = /^(Annotations|Acquire literature) · (Preparing|Review|Running|Completed|Partly completed|Cancelled|Unconfirmed|Undone|Conflict|Failed) · (.+)$/u.exec(text);
   if (match) {
-    const outcome = match[3]!.replace(/^(\d+\/\d+) selected$/u, '已选择 $1').replace(/^(\d+\/\d+) annotations applied$/u, '已应用 $1 个标注').replace(/^(\d+) metadata item(?:s|\(s\))? · (\d+) PDFs attached$/u, '$1 个元数据条目 · 已附加 $2 个 PDF');
+    const outcome = match[3]!.replace(/^(\d+\/\d+) selected$/u, '已选择 $1').replace(/^(\d+\/\d+) annotations applied$/u, '已应用 $1 个标注').replace(/^(\d+) items? saved · (\d+) PDFs? attached$/u, '已保存 $1 个条目 · 已附加 $2 个 PDF');
     if (outcome !== match[3]) return `${match[1] === 'Annotations' ? '标注' : '获取文献'} · ${COPY[match[2]!]!} · ${outcome}`;
   }
   match = /^Reading · (\w+) · (\d+\/\d+) passes$/u.exec(text);
@@ -305,6 +311,10 @@ function progress(text: string): string {
   // Context summary (shell). Every count and page label is captured and re-emitted verbatim.
   match = /^Selected text · page (.+)$/u.exec(text);
   if (match) return `选中文本 · 第 ${match[1]} 页`;
+  match = /^Selected text · page (.+) · paper details and abstract when available$/u.exec(text);
+  if (match) return `选中文本 · 第 ${match[1]} 页 · 可用时加入文献信息和摘要`;
+  match = /^Selected text · page (.+) · automatic paper context off$/u.exec(text);
+  if (match) return `选中文本 · 第 ${match[1]} 页 · 自动文献信息上下文已关闭`;
   match = /^Preparing current PDF text…$/u.exec(text);
   if (match) return '正在准备当前 PDF 文本……';
   match = /^Preparing current PDF text… (\d+) of (\d+) pages$/u.exec(text);

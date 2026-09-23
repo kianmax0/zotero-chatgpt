@@ -49,16 +49,18 @@ function mountPane(service: PreferencesService) {
   return { ready, root, find };
 }
 
-it('forwards the runtime live list to the pane so a Spark id composes end to end, and filters excluded ids', async () => {
-  const service = createPreferencesService({ ...serviceHost(), liveModels: () => Promise.resolve(['gpt-6-astra', 'gpt-5.3-codex-spark', 'gpt-5.5']) });
+it('forwards runtime-reported GPT-6 models to the pane and filters every other id', async () => {
+  const service = createPreferencesService({ ...serviceHost(), liveModels: () => Promise.resolve(['gpt-6-astra', 'gpt-6-sol', 'gpt-6-luna', 'gpt-6-terra', 'gpt-5.5']) });
   const { ready, root, find } = mountPane(service);
   await ready;
-  expect(find<HTMLInputElement>('[data-zchatgpt-model-allowed="gpt-5.3-codex-spark"]')).not.toBeNull();
+  expect(find<HTMLInputElement>('[data-zchatgpt-model-allowed="gpt-6-sol"]')).not.toBeNull();
+  expect(find<HTMLInputElement>('[data-zchatgpt-model-allowed="gpt-6-luna"]')).not.toBeNull();
+  expect(root.querySelector('[data-zchatgpt-model="gpt-6-terra"]')).toBeNull();
   expect(root.querySelector('[data-zchatgpt-model="gpt-5.5"]')).toBeNull();
   expect(find('[data-zchatgpt-pref="models-note"]').textContent).toMatch(/running runtime's report/u);
 });
 
-it('keeps the bundled families and honest copy when the service has no live model port', async () => {
+it('keeps only the bundled current model and honest copy when the service has no live model port', async () => {
   const service = createPreferencesService(serviceHost());
   expect('readLiveModels' in service).toBe(false);
   const { ready, root, find } = mountPane(service);

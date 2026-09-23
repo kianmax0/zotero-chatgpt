@@ -96,9 +96,9 @@ export interface ChatEmbedSurface {
 
 export type OfficialChatContextResult = {
   status: 'ready';
-  document: string;
+  paperContext: string;
   selection: string | null;
-  coverage: { pages: number; totalPages: number; truncated: boolean };
+  coverage: { kind: 'bibliography' };
 } | { status: 'allow' } | { status: 'blocked'; reason: 'context-disabled' | 'context-empty' | 'context-failed' };
 
 export type OfficialChatContextProvider = (question: string) => Promise<OfficialChatContextResult>;
@@ -361,8 +361,8 @@ export function createChatEmbedSurface(win: Window, url: string = CHAT_APP_URL):
         || (!pendingRestore && ['ready', 'composer-ready', 'draft', 'busy', 'generating'].includes(status));
       browser.style.pointerEvents = interactive ? 'auto' : 'none';
       browser.setAttribute('data-zchatgpt-bridge-ready', status);
-      if (status === 'composer-missing') announce('Sign in to official ChatGPT. Automatic PDF context will start only after its supported composer is available.');
-      else if (!interactive) announce('Automatic PDF context is blocked because this ChatGPT page does not expose the supported composer. No question can be sent from this surface.');
+      if (status === 'composer-missing') announce('Sign in to official ChatGPT. Automatic paper context will be included only after its supported composer is available.');
+      else if (!interactive) announce('Automatic paper context is blocked because this ChatGPT page does not expose the supported composer. No question can be sent from this surface.');
       bridgeProbeAfter = Date.now() + (status === 'ready' ? 5000 : 2000);
     } finally {
       bridgeProbeFlight = false;
@@ -426,7 +426,7 @@ export function createChatEmbedSurface(win: Window, url: string = CHAT_APP_URL):
         bridgeIdle = false;
         browser.style.pointerEvents = 'none';
         browser.setAttribute('data-zchatgpt-bridge-ready', 'unsupported-send');
-        announce('Automatic PDF context is blocked because the official ChatGPT send control is unsupported. Your draft was kept and was not sent.');
+        announce('Automatic paper context is blocked because the official ChatGPT send control is unsupported. Your draft was kept and was not sent.');
       }
       return;
     }
@@ -438,10 +438,10 @@ export function createChatEmbedSurface(win: Window, url: string = CHAT_APP_URL):
         if (typeof detail.marker === 'string' && activeMarker?.marker === detail.marker && activeMarker.generation === contextGeneration) {
           bridgeIdle = false;
           browser.setAttribute('data-zchatgpt-bridge-status', status);
-          announce(status === 'accepted' ? 'ChatGPT accepted this message with the frozen current PDF context.'
-            : status === 'accepted-without-context' ? 'ChatGPT accepted this message without PDF context because automatic PDF context is off.'
+          announce(status === 'accepted' ? 'ChatGPT accepted this message with bibliographic paper context and any explicit selection.'
+            : status === 'accepted-without-context' ? 'ChatGPT accepted this message without automatic paper context; an explicit selection may still be included.'
             : status === 'not-accepted' ? 'ChatGPT did not confirm that this message was accepted. It was not sent again.'
-            : status === 'context-blocked' ? 'The PDF context could not be frozen. Your ChatGPT draft was kept and was not sent.'
+            : status === 'context-blocked' ? 'The paper metadata could not be read. Your ChatGPT draft was kept and was not sent.'
             : 'The official ChatGPT composer is unavailable. Your draft was kept and was not sent.');
         }
       }
@@ -459,7 +459,7 @@ export function createChatEmbedSurface(win: Window, url: string = CHAT_APP_URL):
     bridgeIdle = false;
     activeMarker = { marker, generation };
     browser.setAttribute('data-zchatgpt-bridge-status', 'preparing');
-    announce('Preparing frozen current PDF context. Nothing has been sent yet.');
+    announce('Preparing frozen paper metadata and any explicit selection. Nothing has been sent yet.');
     void provider(question).then(result => {
       if (generation !== contextGeneration || binding !== contextBinding || provider !== contextProvider
           || pendingRestore || !officialDocument() || browser.getAttribute(CHAT_EMBED_BINDING_ATTR) !== surfaceBinding) {
@@ -467,8 +467,8 @@ export function createChatEmbedSurface(win: Window, url: string = CHAT_APP_URL):
       }
       if (result.status === 'allow') { respond({ status: 'allow', marker }); return; }
       if (result.status === 'blocked') { respond({ ...result, marker }); return; }
-      respond({ status: 'prepared', marker, text: composeOfficialChatPrompt({
-        question, document: result.document, selection: result.selection,
+      respond({ status: 'prepared', marker, hasAutomaticContext: Boolean(result.paperContext.trim()), text: composeOfficialChatPrompt({
+        question, paperContext: result.paperContext, selection: result.selection,
         coverage: result.coverage, requestMarker: marker,
       }) });
     }).catch(() => { respond({ status: 'blocked', reason: 'context-failed', marker }); });

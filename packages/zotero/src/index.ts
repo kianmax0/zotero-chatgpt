@@ -1,5 +1,6 @@
 import { mountChatView, renderReaderShell } from './chat/view.ts';
 import { ConversationPresenter, type PresenterAgent } from './chat/presenter.ts';
+import { offeredModels } from './chat/generation-settings.ts';
 import { acquireChatSurface, createChatEmbedSurface, type ChatEmbedSurface } from './chat/embed.ts';
 import { dispatchSelectionAction, prepareOfficialChatContext } from './chat/official-chat.ts';
 import { installOfficialChatResource, OFFICIAL_CHAT_RESOURCE_ROOT, registerOfficialChatActor, removeOfficialChatResource, unregisterOfficialChatActor } from './chat/official-chat-actor.ts';
@@ -10,6 +11,8 @@ import { runtimePaths } from './runtime/prepare.ts';
 import { createGeneratedImageLoader } from './runtime/generated-image.ts';
 import { createReaderClient } from '../../core/src/index.ts';
 import { CHAT_TRANSPORT_UNAVAILABLE_MESSAGE } from '../../core/src/chat/chat-transport.ts';
+import { reconcileLibraryOrganization, runLibraryOrganization } from '../../core/src/library/organization.ts';
+import { enforcedAllowedModelIds } from '../../core/src/workspace/allowed-models.ts';
 import { selectionBrief } from '../../core/src/chat/document-brief.ts';
 import { copyFileToClipboard } from './chat/clipboard-file.ts';
 import type { ReaderClient } from '../../contracts/src/runtime.ts';
@@ -29,12 +32,14 @@ import { createPreferencesService } from './preferences/service.ts';
 import { createPreferencePaneRegistrar, type PreferencePaneRegistrar } from './preferences/registration.ts';
 import { createFileActions, type LibraryFileActions } from './actions/files.ts';
 import { createLibraryReferencePort, type LibraryWindow } from './library/reference.ts';
+import { mountLibraryAgentEntry } from './views/library-agent-entry.ts';
 import { ReaderError, paperId, type Citation, type PaperScope } from '../../contracts/src/index.ts';
 declare const Zotero: ZoteroHost;
 declare const crypto: { randomUUID(): string };
 export interface PluginContext { rootURI: string; pluginID: string; version?: string }
 interface ReaderEntry { pane: NativeReaderPane; buttons: Set<HTMLButtonElement>; bar: SelectionActionBar; latestSelectionId?: string; latestCitation?: Citation; stagedOfficialSelection?: string }
 const CLIENT_ID_PREF = 'extensions.zchatgpt.clientId';
+const LIBRARY_AGENT_SESSION_PREF = 'extensions.zchatgpt.libraryAgentSessionId';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
 let context: PluginContext | undefined;
 let paneID = '';
@@ -81,6 +86,7 @@ const PDF_DISCLOSURE_PREF = 'extensions.zchatgpt.pdfTextDisclosureSeen';
 const OFFICIAL_CHAT_URLS_PREF = 'extensions.zchatgpt.officialChatConversationURLs';
 const readers = new Map<HostReader, ReaderEntry>();
 const windows = new Map<ZoteroWindow, () => void>();
+const libraryAgentEntries = new Map<ZoteroWindow, () => void>();
 /** Presenters outlive views: drafts and conversation copies stay while a sidebar is closed. */
 const presenters = new Map<string, ConversationPresenter>();
 const citationVersions = new WeakMap<Citation, Promise<Citation>>();
@@ -100,6 +106,12 @@ function clientId(): string {
   const existing = Zotero.Prefs.get(CLIENT_ID_PREF, true);
   if (typeof existing === 'string' && UUID.test(existing)) return existing;
   const fresh = crypto.randomUUID(); Zotero.Prefs.set(CLIENT_ID_PREF, fresh, true); return fresh;
+}
+/** Stable task-ledger scope for library actions; it is not a PDF attachment or conversation. */
+function libraryAgentSessionId(): string {
+  const existing = Zotero.Prefs.get(LIBRARY_AGENT_SESSION_PREF, true);
+  if (typeof existing === 'string' && UUID.test(existing)) return existing;
+  const fresh = crypto.randomUUID(); Zotero.Prefs.set(LIBRARY_AGENT_SESSION_PREF, fresh, true); return fresh;
 }
 /**
  * The one place the Agent capability is assembled. Task orchestration and multi-pass reading always
@@ -271,15 +283,22 @@ function entry(reader: HostReader): ReaderEntry {
       const hostedBinding = `${paperId(presenter.snapshot().document.paper)}:${reader.itemID}`;
       const prepareHostedContext = () => {
         const snapshot = presenter.snapshot();
-        // First-use disclosure must be acknowledged before a document leaves Zotero. A deliberate
-        // opt-out allows the owner's question through without document context.
+        // The first-send scope notice is informational; the owner's send action is the approval.
+        // Chat context is bibliography + stored abstract only and never reads PDF pages.
         const selected = readers.get(reader)?.stagedOfficialSelection ?? null;
         return prepareOfficialChatContext({
           disclosure: snapshot.document.disclosure,
           enabled: () => Zotero.Prefs.get(AUTO_PDF_PREF, true) !== false,
-          document: () => presenter.exportDocumentBrief(),
+          document: async () => {
+            const result = await presenter.exportPaperContext();
+            if (!result.ok) return result.reason === 'no-info'
+              ? { ok: false as const, reason: 'no-info' as const }
+              : { ok: false as const, reason: 'failed' as const };
+            return { ok: true as const, text: result.text, hasAbstract: result.hasAbstract };
+          },
           selection: selected,
           consumeSelection: () => {
+            if (snapshot.document.disclosure) presenter.acknowledgeContext();
             const source = readers.get(reader);
             if (source?.stagedOfficialSelection === selected) delete source.stagedOfficialSelection;
           },
@@ -546,6 +565,63 @@ export function onMainWindowLoad(window: Window): void {
   const pane = doc.getElementById('zotero-context-pane');
   if (pane) observer.observe(pane, { attributes: true, subtree: true, attributeFilter: ['collapsed', 'selectedIndex'] });
   windows.set(win, () => { observer.disconnect(); doc.removeEventListener('click', onNativeClick, true); css.remove(); katex.remove(); locale.remove(); });
+  try {
+    const services = localServices;
+    if (services) libraryAgentEntries.set(win, mountLibraryAgentEntry({
+      document: doc,
+      sessionId: libraryAgentSessionId(),
+      getTasks: () => services.getTasks(),
+      collections: () => services.library.collections(),
+      startLogin: async () => {
+        const flow = await (await sharedClient()).startLogin();
+        Zotero.launchURL(flow.authorizationUrl);
+      },
+      organizeSelected: async (question, _window, sessionId) => {
+        if (!documentCache) throw new ReaderError('RUNTIME_UNAVAILABLE', 'The Zotero library is unavailable.');
+        const bound = createLibraryReferencePort(Zotero, {
+          clientId: clientId(), documentCache,
+          uuid: () => crypto.randomUUID(), now: () => new Date().toISOString(),
+          getWindow: () => win as unknown as Window & LibraryWindow,
+        });
+        if (!bound.selectedItems) throw new ReaderError('UNSUPPORTED_INTERACTION', 'The Zotero library selection is unavailable.');
+        // Calling selectedItems copies the owning window's row keys synchronously, before its first
+        // native read awaits. Start all local snapshots now: login/reconciliation may take minutes,
+        // and a later focus or selection change must not redirect this click to different items.
+        const selectionSnapshot = bound.selectedItems().then(value => ({ ok: true as const, value }), (error: unknown) => ({ ok: false as const, error }));
+        const collectionSnapshot = bound.collections().then(value => ({ ok: true as const, value }), (error: unknown) => ({ ok: false as const, error }));
+        const settingsSnapshot = services.getWorkspace().then(workspace => workspace.settings()).then(value => ({ ok: true as const, value }), (error: unknown) => ({ ok: false as const, error }));
+        await ensureAgent();
+        const runtime = await sharedClient();
+        if (runtime.snapshot().account.state !== 'signedIn') throw new ReaderError('AUTH_REQUIRED', 'Sign in to Agent before organizing selected Zotero items.');
+        const connection = agent?.currentConnection();
+        if (!connection) throw new ReaderError('RUNTIME_UNAVAILABLE', 'The Agent connection is unavailable.');
+        const storage = await services.getStorage();
+        const tasks = await services.getTasks();
+        const reconciled = await reconcileLibraryOrganization({ storage, connection, tasks, sessionId });
+        if (reconciled) return;
+        const selection = await selectionSnapshot; if (!selection.ok) throw selection.error;
+        const collectionList = await collectionSnapshot; if (!collectionList.ok) throw collectionList.error;
+        const settings = await settingsSnapshot; if (!settings.ok) throw settings.error;
+        const collections = collectionList.value.filter(collection => collection.libraryId === selection.value[0]?.libraryId);
+        const model = offeredModels(runtime.snapshot().models, enforcedAllowedModelIds(settings.value.allowedModels))[0];
+        if (!model) throw new ReaderError('MODEL_UNAVAILABLE', 'No supported GPT-6 Agent model is available for this account.');
+        await runLibraryOrganization({
+          connection, storage, tasks, sessionId, requestId: crypto.randomUUID(),
+          question, selection: selection.value, collections, model, cwd: runtimePaths(geckoHost().host).cwd,
+        });
+      },
+      openOutput: async (task, itemId) => {
+        const output = task.items.find(item => item.id === itemId);
+        const reference = task.kind === 'acquisition' && output?.kind === 'acquisition' ? output.item
+          : task.kind === 'organization' && output?.kind === 'organization' ? output.before : null;
+        if (!reference) throw new ReaderError('NOT_FOUND', 'The saved Zotero item could not be opened.');
+        const item = Zotero.Items.getByLibraryAndKey?.(reference.libraryId, reference.key) || undefined;
+        const pane = (win as ZoteroWindow & { ZoteroPane?: { selectItem(id: number): Promise<void> } }).ZoteroPane;
+        if (!item?.id || !pane) throw new ReaderError('NOT_FOUND', 'The saved Zotero item could not be opened from this window.');
+        await pane.selectItem(item.id);
+      },
+    }));
+  } catch (error) { Zotero.logError(error); }
   // Enabling an add-on does not necessarily rerender an already-open reader toolbar.
   for (const reader of Zotero.Reader._readers) {
     if (reader._window !== win) continue;
@@ -556,6 +632,7 @@ export function onMainWindowLoad(window: Window): void {
 }
 export function onMainWindowUnload(window: Window): void {
   const win = window as ZoteroWindow;
+  libraryAgentEntries.get(win)?.(); libraryAgentEntries.delete(win);
   // The window is going away, so its Chat surface goes with it: the document cannot outlive the
   // window it was created in.
   for (const surface of chatSurfaces.get(win)?.values() ?? []) surface.destroy(); chatSurfaces.delete(win);

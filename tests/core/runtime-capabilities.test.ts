@@ -15,7 +15,7 @@ const quota = { rateLimits: { primary: { usedPercent: 99 } }, rateLimitsByLimitI
 async function setup(configure?: (fixture: ReturnType<typeof server>) => void) {
   const fixture = server(); fixture.handlers.set('modelProvider/capabilities/read', () => ({ ...capabilities, privateData: 'do-not-expose-provider' })); fixture.handlers.set('account/rateLimits/read', () => structuredClone(quota)); configure?.(fixture);
   let id = 0;
-  const client = await createReaderClient(fixture.p, new MemoryStorage(), { codexVersion: '0.154.0', cwd: '/isolated', uuid: () => `12345678-0000-4000-8000-${String(++id).padStart(12, '0')}`, pluginVersion: '0.4.0-runtime-test', now: () => '2026-09-12T10:00:00.000Z' });
+  const client = await createReaderClient(fixture.p, new MemoryStorage(), { codexVersion: '0.156.1', cwd: '/isolated', uuid: () => `12345678-0000-4000-8000-${String(++id).padStart(12, '0')}`, pluginVersion: '0.4.0-runtime-test', now: () => '2026-09-12T10:00:00.000Z' });
   clients.push(client); return { ...fixture, client };
 }
 

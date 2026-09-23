@@ -3,17 +3,20 @@ import { describe, expect, it, vi } from 'vitest';
 import { ConversationPresenter, type PresenterState } from '../../../packages/zotero/src/chat/presenter.ts';
 import type { ReaderClient, RuntimeSnapshot } from '../../../packages/contracts/src/runtime.ts';
 import { ReaderError, SHAREABLE_STORAGE_LOCATION, paperId, type Conversation, type MessageStatus, type PaperIdentity, type ReaderEvent, type SendInput, type ShareableDiagnostics } from '../../../packages/contracts/src/index.ts';
-import { citationA, citationB, imageA, paperA, settings } from '../../contracts/factories.ts';
+import { citationA, citationB, imageA, paperA, settings as baseSettings } from '../../contracts/factories.ts';
 import { estimateRequestBudget } from '../../../packages/core/src/codex/model-capabilities.ts';
+import { defaultSettings } from '../../../packages/core/src/workspace/skills.ts';
 import { presenterContext } from '../presenter-context.ts';
 import { documentA } from '../../contracts/document-fixture.ts';
 import type { ClipboardImageRead } from '../../../packages/zotero/src/chat/pick-images.ts';
-const model = { id: 'catalog-default', displayName: 'Catalog Default', isDefault: true, supportedReasoningEfforts: [{ id: 'medium', description: '' }, { id: 'high', description: '' }], defaultReasoningEffort: 'medium', serviceTiers: [{ id: 'priority', name: 'Priority', description: '' }, { id: 'flex', name: 'Flex', description: '' }], defaultServiceTier: 'priority' };
-const other = { id: 'other-model', displayName: 'Other Model', isDefault: false, supportedReasoningEfforts: [{ id: 'low', description: '' }], defaultReasoningEffort: 'low', serviceTiers: [] as Array<{ id: string; name: string; description: string }>, defaultServiceTier: null };
-function fixture(options: { signedIn?: boolean; clipboard?: () => Promise<ClipboardImageRead> } = {}) {
+import type { ReaderWorkspace, WorkspaceSettings } from '../../../packages/contracts/src/workspace.ts';
+const model = { id: 'gpt-6-sol', displayName: 'GPT-6 Sol', isDefault: true, supportedReasoningEfforts: [{ id: 'medium', description: '' }, { id: 'high', description: '' }], defaultReasoningEffort: 'medium', serviceTiers: [{ id: 'priority', name: 'Priority', description: '' }, { id: 'flex', name: 'Flex', description: '' }], defaultServiceTier: 'priority' };
+const other = { id: 'gpt-6-luna', displayName: 'GPT-6 Luna', isDefault: false, supportedReasoningEfforts: [{ id: 'low', description: '' }], defaultReasoningEffort: 'low', serviceTiers: [] as Array<{ id: string; name: string; description: string }>, defaultServiceTier: null };
+const settings = { ...baseSettings, model: 'gpt-6-sol' };
+function fixture(options: { signedIn?: boolean; clipboard?: () => Promise<ClipboardImageRead>; workspaceSettings?: WorkspaceSettings; initialMessages?: Conversation['messages'] } = {}) {
   let runtime: RuntimeSnapshot = { revision: 0, runtime: 'ready', account: { state: options.signedIn === false ? 'signedOut' : 'signedIn' }, login: null, models: options.signedIn === false ? [] : [model], error: null };
   const observers = new Set<(s: RuntimeSnapshot) => void>(); const listeners = new Set<(e: ReaderEvent) => void>();
-  let conversation: Conversation = { id: '2e4a6c8e-0b1d-4f3a-a5c7-9e1b3d5f7a90', paper: paperA, title: 'Synthetic Paper A', settings, activeRequestId: null, messages: [], lastSeq: 0, createdAt: 'now', updatedAt: 'now' };
+  let conversation: Conversation = { id: '2e4a6c8e-0b1d-4f3a-a5c7-9e1b3d5f7a90', paper: paperA, title: 'Synthetic Paper A', settings, activeRequestId: null, messages: options.initialMessages ?? [], lastSeq: 0, createdAt: 'now', updatedAt: 'now' };
   const conversations: Conversation[] = [];
   /**
    * One authoritative object per chat id, the way the real service keeps them: a chat the presenter
@@ -78,7 +81,14 @@ function fixture(options: { signedIn?: boolean; clipboard?: () => Promise<Clipbo
     reconnect: vi.fn(() => Promise.resolve()),
   };
   const states: PresenterState[] = [];
-  const services = { client: vi.fn(() => Promise.resolve(client)), ensureAgent: vi.fn(() => Promise.resolve()), chatUnavailableReason: vi.fn<() => string | null>(() => null), openAuthorization: vi.fn(), uuid: (() => { let n = 0; return () => `9a1c3e5f-7b2d-4c6e-8f0a-${String(++n).padStart(12, '0')}`; })(), now: () => '2026-09-09T08:00:00.000Z', ...(options.clipboard ? { readClipboardImage: options.clipboard } : {}) };
+  const workspace: ReaderWorkspace | undefined = options.workspaceSettings ? {
+    settings: () => Promise.resolve(structuredClone(options.workspaceSettings!)), saveSettings: async () => {},
+    saveSkill: skill => Promise.resolve(skill), importSkill: () => Promise.reject(new Error('unused')), deleteSkill: () => Promise.resolve(),
+    saveDraft: () => Promise.resolve(), readDraft: () => Promise.resolve(null), deleteDraft: () => Promise.resolve(), history: () => Promise.resolve([]),
+    readConversation: () => Promise.reject(new Error('unused')), currentConversation: () => Promise.resolve(null),
+    snapshotChat: () => Promise.reject(new Error('unused')),
+  } : undefined;
+  const services = { client: vi.fn(() => Promise.resolve(client)), ensureAgent: vi.fn(() => Promise.resolve()), chatUnavailableReason: vi.fn<() => string | null>(() => null), openAuthorization: vi.fn(), uuid: (() => { let n = 0; return () => `9a1c3e5f-7b2d-4c6e-8f0a-${String(++n).padStart(12, '0')}`; })(), now: () => '2026-09-09T08:00:00.000Z', ...(options.clipboard ? { readClipboardImage: options.clipboard } : {}), ...(workspace ? { getWorkspace: () => Promise.resolve(workspace) } : {}) };
   const presenter = new ConversationPresenter(presenterContext(paperA, 'Synthetic Paper A'), services);
   const unbind = presenter.bind(state => states.push(state));
   type Pending = ReaderEvent extends infer E ? E extends ReaderEvent ? Omit<E, 'seq' | 'conversationId' | 'at'> : never : never;
@@ -234,25 +244,30 @@ describe('conversation presenter', () => {
     expect(validate).toHaveBeenCalledTimes(1);
     expect(f.sent).toHaveLength(0);
   });
-  it('prepares the current paper as clipboard text for the hosted Chat surface without a request', async () => {
+  it('exports compact paper context for hosted Chat without preparing PDF pages or starting a request', async () => {
     const f = fixture();
     const prepare = vi.fn(() => Promise.resolve(documentA)); const validate = vi.fn(async () => {});
-    const presenter = new ConversationPresenter(presenterContext(paperA, 'Synthetic Paper A'), {
+    const identity: PaperIdentity = {
+      title: 'Synthetic Paper A', authors: ['Ada Lovelace'], itemType: 'journalArticle',
+      publicationTitle: 'Journal of Synthetic Results', year: '2024', doi: '10.1000/synthetic',
+      abstractNote: 'A stored abstract.',
+    };
+    const presenter = new ConversationPresenter(presenterContext(paperA, 'Synthetic Paper A', identity), {
       ...f.services, chatHostedExternally: true,
       document: { prepare, validate, readEnabled: () => true, writeEnabled: () => {} },
     });
     await presenter.activate();
     const brief = await presenter.exportDocumentBrief();
-    expect(brief).toMatchObject({ ok: true, pages: 2, totalPages: 2, truncated: false });
+    expect(brief).toMatchObject({ ok: true, pages: 0, totalPages: 0, truncated: false });
     if (!brief.ok) throw new Error('expected a brief');
-    expect(brief.text).toContain('Paper: Synthetic Paper A');
-    expect(brief.text).toContain('Definition: x denotes the hidden state.');
-    // The hosted application owns the conversation: preparing text for the clipboard starts no
-    // request, no session and no task, even though the local PDF read did run.
-    expect(prepare).toHaveBeenCalledTimes(1);
+    expect(brief.text).toContain('Title: Synthetic Paper A');
+    expect(brief.text).toContain('Abstract:\nA stored abstract.');
+    expect(brief.text).not.toContain('Definition: x denotes the hidden state.');
+    // Chat context comes from frozen bibliography fields and does not prepare a PDF read.
+    expect(prepare).not.toHaveBeenCalled();
     expect(f.sent).toHaveLength(0);
   });
-  it('reports an unreadable PDF and a disabled document instead of promising an empty brief', async () => {
+  it('reports missing bibliography instead of promising an empty brief', async () => {
     const f = fixture();
     const empty = { ...documentA, pages: documentA.pages.map(page => ({ ...page, text: '', status: 'empty' as const })) };
     const presenter = new ConversationPresenter(presenterContext(paperA, 'A'), {
@@ -264,15 +279,20 @@ describe('conversation presenter', () => {
       ...f.services, document: { prepare: () => Promise.resolve(documentA), validate: async () => {}, readEnabled: () => false, writeEnabled: () => {} },
     });
     await disabled.activate();
-    expect(await disabled.exportDocumentBrief()).toEqual({ ok: false, reason: 'unavailable' });
+    expect(await disabled.exportDocumentBrief()).toEqual({ ok: false, reason: 'no-text' });
   });
-  it('reports a failed local read as a failure, keeping the reading error on the presenter', async () => {
+  it('reports a failed metadata read without touching the PDF', async () => {
     const f = fixture();
+    const prepare = vi.fn(() => Promise.reject(new Error('The PDF could not be read.')));
     const presenter = new ConversationPresenter(presenterContext(paperA, 'A'), {
-      ...f.services, document: { prepare: () => Promise.reject(new Error('The PDF could not be read.')), validate: async () => {}, readEnabled: () => true, writeEnabled: () => {} },
+      ...f.services,
+      readPaperIdentity: () => Promise.reject(new Error('The item could not be read.')),
+      document: { prepare, validate: async () => {}, readEnabled: () => true, writeEnabled: () => {} },
     });
     await presenter.activate();
+    const readsAfterActivate = prepare.mock.calls.length;
     expect(await presenter.exportDocumentBrief()).toEqual({ ok: false, reason: 'failed' });
+    expect(prepare).toHaveBeenCalledTimes(readsAfterActivate);
     expect(f.sent).toHaveLength(0);
   });
   it('copies the paper bibliography without reading the PDF, and reads it by the frozen scope', async () => {
@@ -341,9 +361,12 @@ describe('conversation presenter', () => {
     await presenter.activate(); presenter.setQuestion('What does x denote?'); await presenter.send();
     const request = f.sent[0]!;
     // The report the send carries must be the core estimate for that same request, not a second formula.
-    const expected = estimateRequestBudget({ request, messages: [] });
+    // `planInput` estimates before adding its resulting report to the request, so remove that
+    // generated metadata before independently checking the same core authority.
+    const budgetRequest = { ...request }; delete budgetRequest.contextReport;
+    const expected = estimateRequestBudget({ request: budgetRequest, messages: [] });
     expect(presenter.snapshot().contextReport).toMatchObject({ capacity: expected.capacity, provenance: expected.provenance, reservedTokens: expected.reservations.total, textBudgetTokens: expected.textBudgetTokens });
-    expect(presenter.snapshot().contextReport?.reason).toContain('Model capacity or retained history is unknown');
+    expect(presenter.snapshot().contextReport?.reason).toContain('conservative estimate');
   });
   it('keeps PDF failures visible and never sends a bibliographic-only substitute', async () => {
     const f = fixture(); const presenter = new ConversationPresenter(presenterContext(paperA, 'A'), { ...f.services, document: {
@@ -599,12 +622,28 @@ describe('conversation presenter', () => {
   it('setSettings only changes the unsent draft; More details and Ask send that combo, not conversation.settings', async () => {
     const f = fixture(); await f.presenter.activate();
     f.setRuntime({ models: [model, other] });
-    f.presenter.setSettings({ model: 'other-model', serviceTier: 'priority', effort: 'medium' });
-    expect(f.last().draft.settings).toEqual({ model: 'other-model', serviceTier: null, effort: 'low' });
+    f.presenter.setSettings({ model: 'gpt-6-luna', serviceTier: 'priority', effort: 'medium' });
+    expect(f.last().draft.settings).toEqual({ model: 'gpt-6-luna', serviceTier: null, effort: 'low' });
     expect(f.last().conversation?.settings).toEqual(settings); expect(f.sent).toHaveLength(0);
     await f.presenter.explain(citationA);
-    expect(f.sent[0]?.settings).toEqual({ model: 'other-model', serviceTier: null, effort: 'low' });
-    expect(f.last().conversation?.messages[0]?.settings).toEqual({ model: 'other-model', serviceTier: null, effort: 'low' });
+    expect(f.sent[0]?.settings).toEqual({ model: 'gpt-6-luna', serviceTier: null, effort: 'low' });
+    expect(f.last().conversation?.messages[0]?.settings).toEqual({ model: 'gpt-6-luna', serviceTier: null, effort: 'low' });
+  });
+  it('constrains active composer and Agent sends to Preferences while keeping legacy message settings readable', async () => {
+    const workspaceSettings: WorkspaceSettings = {
+      ...defaultSettings(), allowedModels: [{ id: 'gpt-6-luna', name: 'GPT-6 Luna' }],
+    };
+    const legacySettings = { ...settings, model: 'gpt-5.6-sol' };
+    const f = fixture({ workspaceSettings, initialMessages: [{ id: 'legacy-user', requestId: 'legacy-request', role: 'user', phase: null, settings: legacySettings, text: 'Previously saved with old model', citations: [], status: 'completed' }] }); await f.presenter.activate();
+    f.setRuntime({ models: [model, other] });
+    f.presenter.setSettings({ model: 'gpt-6-sol', serviceTier: 'flex', effort: 'high' });
+    expect(f.last().draft.settings).toEqual({ model: 'gpt-6-luna', serviceTier: null, effort: 'low' });
+    expect(f.last().conversation?.settings).toEqual(settings);
+    f.presenter.setMode('agent');
+    f.presenter.setQuestion('Use the selected model'); await f.presenter.send();
+    expect(f.sent[0]?.settings).toEqual({ model: 'gpt-6-luna', serviceTier: null, effort: 'low' });
+    expect(f.last().conversation?.messages[0]?.settings).toEqual(legacySettings);
+    expect(f.last().conversation?.messages.at(-1)?.settings).toEqual({ model: 'gpt-6-luna', serviceTier: null, effort: 'low' });
   });
   it('changing controls while generating leaves the in-flight snapshot alone and applies only to the next send', async () => {
     const f = fixture(); await f.presenter.activate();
@@ -612,12 +651,12 @@ describe('conversation presenter', () => {
     f.presenter.setQuestion('第一问'); await f.presenter.send();
     const frozen = f.last().conversation!.messages[0]!.settings;
     expect(frozen).toEqual(settings); expect(f.last().generating).toBe(true);
-    f.presenter.setSettings({ model: 'catalog-default', serviceTier: 'flex', effort: 'high' });
+    f.presenter.setSettings({ model: 'gpt-6-sol', serviceTier: 'flex', effort: 'high' });
     expect(f.last().conversation?.messages[0]?.settings).toEqual(frozen);
-    expect(f.last().draft.settings).toEqual({ model: 'catalog-default', serviceTier: 'flex', effort: 'high' });
+    expect(f.last().draft.settings).toEqual({ model: 'gpt-6-sol', serviceTier: 'flex', effort: 'high' });
     f.emit({ type: 'completed', requestId: f.sent[0]!.requestId, messageId: 'a1', finalText: '答' });
     f.presenter.setQuestion('追问'); await f.presenter.send();
-    expect(f.sent[1]?.settings).toEqual({ model: 'catalog-default', serviceTier: 'flex', effort: 'high' });
+    expect(f.sent[1]?.settings).toEqual({ model: 'gpt-6-sol', serviceTier: 'flex', effort: 'high' });
     expect(f.last().conversation?.messages[0]?.settings).toEqual(frozen);
     expect(f.client.newConversation).not.toHaveBeenCalled();
   });

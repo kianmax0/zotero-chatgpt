@@ -39,6 +39,12 @@ async function runHostSmoke(config) {
     await Zotero.Libraries.get(Zotero.Libraries.userLibraryID).waitForDataLoad('item');
     const addon = await AddonManager.getAddonByID(config.subjectID); if (addon?.userDisabled) await addon.enable();
     await check('full-xpi-active', addon?.isActive && addon.version === config.subjectVersion);
+    const libraryAgentEntry = await until(() => win.document.querySelector('[data-zchatgpt-library-agent]'), 'library-agent-entry');
+    await check('library-agent-entry-visible-without-reader', Boolean(libraryAgentEntry && !libraryAgentEntry.hidden), { openReaders: Zotero.Reader._readers.length });
+    click(libraryAgentEntry);
+    const libraryAgentPanel = await until(() => win.document.querySelector('[data-zchatgpt-library-agent-panel]:not([hidden])'), 'library-agent-panel');
+    await check('library-agent-opens-without-reader', Boolean(libraryAgentPanel), { openReaders: Zotero.Reader._readers.length });
+    click(libraryAgentPanel.querySelector('[aria-label="Close Zotero library Agent"]'));
     const title = 'ZCHATGPT current-PDF synthetic context and native interaction test';
     const parent = new Zotero.Item('journalArticle'); parent.setField('title', title);
     let organizationFixture = null;
@@ -697,6 +703,19 @@ async function runHostSmoke(config) {
       for (const file of files) if (file.endsWith('.json') && !file.endsWith('.source.json')) total += JSON.parse(await IOUtils.readUTF8(file)).requests.length;
       return total;
     };
+    const newestStoredRequestModel = async () => {
+      const files = await IOUtils.exists(records) ? await IOUtils.getChildren(records) : [];
+      const rows = [];
+      for (const file of files) {
+        if (!file.endsWith('.json') || file.endsWith('.source.json')) continue;
+        const record = JSON.parse(await IOUtils.readUTF8(file));
+        for (const request of record.requests ?? []) {
+          const user = (record.messages ?? []).find(message => message.role === 'user' && message.requestId === request.requestId);
+          rows.push({ at: request.createdAt, model: user?.settings?.model ?? null });
+        }
+      }
+      return rows.sort((a, b) => b.at.localeCompare(a.at))[0]?.model ?? null;
+    };
     const requests = await countStoredRequests();
     report.recordedRequests = requests;
     if (!config.live) {
@@ -764,6 +783,21 @@ async function runHostSmoke(config) {
       }
       await check('live-account-signed-in', panel().dataset.zchatgptAuth === 'signedIn');
       const picker = panel().querySelector('[data-zchatgpt-picker]');
+      // The preserved profile can have an old Astra draft. Never infer the test model from a
+      // default or a stored conversation: explicitly choose Sol/Luna before the first live send.
+      click(picker);
+      const lowCostOption = await until(() => panel()?.querySelector('[data-zchatgpt-setting="model"][data-zchatgpt-value="gpt-6-sol"]')
+        || panel()?.querySelector('[data-zchatgpt-setting="model"][data-zchatgpt-value="gpt-6-luna"]'), 'live-low-cost-model-option', 10000).catch(() => null);
+      if (!lowCostOption || lowCostOption.disabled) {
+        report.status = 'blocked'; report.blockedStage = 'sol-or-luna-model-unavailable'; report.finishedAt = new Date().toISOString();
+        if (config.liveCoreFlows) report.liveCoreFlows.status = 'blocked';
+        await save(); return;
+      }
+      click(lowCostOption);
+      report.testModel = lowCostOption.dataset.zchatgptValue;
+      const selectedLowCost = await until(() => new RegExp(report.testModel === 'gpt-6-sol' ? 'Sol' : 'Luna', 'u').test(picker.textContent ?? ''), 'live-low-cost-model-selected', 10000).catch(() => null);
+      await check('live-low-cost-model-selected-before-send', Boolean(selectedLowCost) && ['gpt-6-sol', 'gpt-6-luna'].includes(report.testModel), { model: report.testModel, picker: picker.textContent });
+      if (picker.getAttribute('aria-expanded') === 'true') click(picker);
       report.liveModel = picker.textContent;
       if (config.liveCoreFlows) {
         const tagNames = item => item.getTags().map(entry => entry.tag).sort();
@@ -777,6 +811,8 @@ async function runHostSmoke(config) {
           click(send); if (afterClick) await afterClick();
           await until(() => panel()?.dataset.zchatgptGenerating === 'true', `${label}-request-accepted`, 30000);
           await until(() => panel()?.dataset.zchatgptGenerating === 'false', `${label}-request-terminal`, 180000);
+          const issuedModel = await newestStoredRequestModel();
+          await check(`${label}-uses-selected-low-cost-model`, issuedModel === report.testModel, { expected: report.testModel, actual: issuedModel });
           report.liveCoreFlows.modelTurns += 1; await save();
         };
         const annotationsBefore = a.getAnnotations().length;
@@ -827,6 +863,8 @@ async function runHostSmoke(config) {
       await until(() => panel()?.dataset.zchatgptGenerating === 'false', 'live-answer-terminal', 120000);
       const record = JSON.parse(await IOUtils.readUTF8(PathUtils.join(records, `${conversationA}.json`)));
       const last = record.requests.at(-1);
+      const issuedModel = record.messages.find(m => m.requestId === last?.requestId && m.role === 'user')?.settings?.model ?? null;
+      await check('live-request-uses-selected-low-cost-model', issuedModel === report.testModel, { expected: report.testModel, actual: issuedModel });
       const answer = record.messages.filter(m => m.role === 'assistant' && m.requestId === last?.requestId).map(m => m.text).join('\n');
       report.live = { state: last?.state, latencyMs: win.performance.now() - started, answer: answer.slice(0, 1600), inputDocumentId: record.messages.find(m => m.requestId === last?.requestId && m.role === 'user')?.document?.id };
       await check('real-model-answer', last?.state === 'completed' && answer.trim().length > 0, { state: last?.state, characters: answer.length });
@@ -839,6 +877,8 @@ async function runHostSmoke(config) {
       await until(() => panel()?.querySelector('[data-status="streaming"] [data-zchatgpt-text]')?.textContent?.length > 0 || panel()?.dataset.zchatgptGenerating === 'false', 'live-followup-output', 120000);
       const stop = panel().querySelector('[data-zchatgpt-action="stop"]'); if (panel().dataset.zchatgptGenerating === 'true') stop.click();
       await until(() => panel()?.dataset.zchatgptGenerating === 'false', 'live-followup-stopped', 30000);
+      const followupModel = await newestStoredRequestModel();
+      await check('live-followup-uses-selected-low-cost-model', followupModel === report.testModel, { expected: report.testModel, actual: followupModel });
       const afterStop = JSON.parse(await IOUtils.readUTF8(PathUtils.join(records, `${conversationA}.json`)));
       const terminal = afterStop.requests.at(-1)?.state;
       report.live.stopState = terminal;

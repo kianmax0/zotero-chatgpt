@@ -10,11 +10,11 @@ import { estimateRequestBudget, type ContextBudget } from '../../../core/src/cod
 import { planContext, type ContextPlan } from '../../../core/src/context/planner.ts';
 import type { ReadingJob } from '../../../core/src/context/coordinator.ts';
 import { conversationHasAgentWork } from '../../../core/src/chat/agent-work.ts';
-import { documentBrief } from '../../../core/src/chat/document-brief.ts';
 import { paperContext } from '../../../core/src/chat/paper-context.ts';
 import { addCitation, addImage, makeAsk, makeExplain, moveImage, removeCitation, removeImage, workspaceDraft } from './draft.ts';
 import { pluginClipboardAccess, readGeckoClipboardImage, type ClipboardImageRead } from './pick-images.ts';
 import { alignSettings, catalogDefaultSettings } from './generation-settings.ts';
+import { enforcedAllowedModelIds } from '../../../core/src/workspace/allowed-models.ts';
 import type { DocumentServices, ReaderContext } from '../reader/context.ts';
 import type { PresenterAgent, PresenterReading } from './capability.ts';
 import { executeAgentSend, requestsCurrentPaperAnnotations, requestsSelectionOrganization, type AgentSendContext } from './agent-execution.ts';
@@ -372,9 +372,10 @@ export class ConversationPresenter {
   }
   private currentSettings(): GenerationSettings | null {
     const models = this.state.runtime?.models ?? [];
-    const current = this.state.draft.settings ?? this.state.conversation?.settings ?? catalogDefaultSettings(models);
+    const allowedIds = enforcedAllowedModelIds(this.state.workspace?.allowedModels);
+    const current = this.state.draft.settings ?? this.state.conversation?.settings ?? catalogDefaultSettings(models, allowedIds);
     if (!current) return null;
-    return models.length ? alignSettings(models, current) : current;
+    return models.length ? alignSettings(models, current, allowedIds) : current;
   }
   private draftKey(): string { return this.state.conversation?.id ?? 'unbound'; }
   private transferUnboundMode(conversationId: string): void {
@@ -858,7 +859,8 @@ export class ConversationPresenter {
   /** Draft only: never edits an in-flight or already-submitted message snapshot. */
   setSettings(settings: GenerationSettings): void {
     const models = this.state.runtime?.models ?? [];
-    const next = models.length ? alignSettings(models, settings) : { model: settings.model, serviceTier: settings.serviceTier, effort: settings.effort };
+    const allowedIds = enforcedAllowedModelIds(this.state.workspace?.allowedModels);
+    const next = models.length ? alignSettings(models, settings, allowedIds) : { model: settings.model, serviceTier: settings.serviceTier, effort: settings.effort };
     this.changeDraft({ ...this.state.draft, settings: next });
   }
   // ---- runtime ----------------------------------------------------------------------------------
@@ -912,27 +914,18 @@ export class ConversationPresenter {
   prepareContext(): Promise<DocumentContext> { return this.prepareDocument(this.state.document.range); }
   /**
    * The current paper as clipboard text, for Chat mode's hosted application. The web app owns its own
-   * conversation and this host has no supported way to inject context into it, so the owner is handed
-   * the text they paste themselves. That makes this a local read, not a request: it may start the PDF
-   * read the hosted surface never needed, and it touches no Codex session, task, tool or approval.
+   * conversation and this host has no supported way to inject context into it. This compatibility
+   * method returns only the bibliography and stored abstract; it never prepares or reads PDF pages.
    */
   async exportDocumentBrief(): Promise<DocumentBriefResult> {
-    if (!this.state.document.enabled) return { ok: false, reason: 'unavailable' };
-    try {
-      const brief = documentBrief(this.identity, await this.prepareContext());
-      if (!brief) return { ok: false, reason: 'no-text' };
-      return { ok: true, text: brief.text, pages: brief.included, totalPages: brief.totalPages, truncated: brief.truncated };
-    } catch {
-      // The reading failure is already reported on the presenter's own error surface; the clipboard
-      // call site only needs to know that nothing was copied.
-      return { ok: false, reason: 'failed' };
-    }
+    const context = await this.exportPaperContext();
+    if (!context.ok) return { ok: false, reason: context.reason === 'no-info' ? 'no-text' : 'failed' };
+    return { ok: true, text: context.text, pages: 0, totalPages: 0, truncated: false };
   }
   /**
    * The paper's bibliographic context as clipboard text: title, authors, publication, year, DOI and
-   * the stored abstract. This is the manual copy button's content and it never reads the PDF — the
-   * automatic context that ChatGPT receives still goes through `documentBrief`, so trimming this
-   * copy cannot silently shrink what a send carries.
+   * the stored abstract. This is also the exact compact paper context automatically included by
+   * Chat; neither path reads PDF body text.
    *
    * The scope is frozen before the await and any optional re-read is addressed by that frozen scope,
    * so a slower read for paper A can never return while the reader shows B and paste A's title with
@@ -1023,7 +1016,7 @@ export class ConversationPresenter {
     if (this.disposed) return;
     let draft = this.state.draft;
     if (snapshot.models.length && draft.settings) {
-      const aligned = alignSettings(snapshot.models, draft.settings);
+      const aligned = alignSettings(snapshot.models, draft.settings, enforcedAllowedModelIds(this.state.workspace?.allowedModels));
       if (aligned.model !== draft.settings.model || aligned.serviceTier !== draft.settings.serviceTier || aligned.effort !== draft.settings.effort) {
         draft = { ...draft, settings: aligned };
       }
@@ -1457,7 +1450,12 @@ export class ConversationPresenter {
       // Last line of defence: no Chat request may reach the shared service without a Chat transport,
       // so Chat can never be routed to Codex by a path that forgot to check.
       if (mode === 'chat') { const reason = this.services.chatUnavailableReason(); if (reason) throw new ReaderError('UNSUPPORTED_INTERACTION', reason); }
-      const workflow = this.frozenWorkflow(draft, configuration ?? this.state.workspace, mode, input.question);
+      // Preferences can change after the visible composer was rendered. Constrain the frozen request
+      // against the fresh settings snapshot, without rewriting the stored conversation snapshot.
+      const models = this.state.runtime?.models ?? [];
+      const workspaceSettings = configuration ?? this.state.workspace;
+      if (models.length) input.settings = alignSettings(models, input.settings, enforcedAllowedModelIds(workspaceSettings?.allowedModels));
+      const workflow = this.frozenWorkflow(draft, workspaceSettings, mode, input.question);
       if (workflow) input.workflow = workflow;
       const skillWorkflow = workflow?.skill?.workflow ?? null;
       // Stage 6/8: the composer's mode control is the single authority for `mode`; `workflow` never

@@ -41,6 +41,7 @@ function itemOutcome(item: TaskItem): string {
   if (item.attachmentUndone) return 'Metadata saved; PDF removed';
   if (item.acquisition?.status === 'attached') return 'PDF attached';
   if (item.acquisition?.status === 'unavailable') return `Metadata saved; PDF unavailable (${item.acquisition.reason.replace(/-/gu, ' ')})`;
+  if (item.acquisition?.status === 'uncertain' && item.status === 'metadata-only') return `Metadata saved; PDF unavailable (${item.acquisition.reason.replace(/-/gu, ' ')})`;
   if (item.acquisition?.status === 'uncertain') return 'Metadata saved; PDF result unconfirmed';
   if (item.choice?.downloadPDF === false) return 'Metadata saved; PDF not requested';
   return item.status === 'metadata-only' ? 'Metadata saved; PDF not attempted' : 'Metadata saved';
@@ -198,10 +199,12 @@ export function mountTaskView(container: HTMLElement, actions: TaskViewActions):
       const ids = new Set(task.items.map(item => item.id)); for (const id of rowViews.keys()) if (!ids.has(id)) { rowViews.delete(id); selected.delete(id); choices.delete(id); }
       const ready = task.items.filter(eligible); const selectedItems = ready.filter(item => selected.get(item.id));
       const validChoices = selectedItems.every(item => item.kind !== 'acquisition' || choiceFor(item).valid);
-      const outputs = task.items.filter(hasOutput); const metadataOnly = task.items.filter(item => item.kind === 'acquisition' && item.item && item.status !== 'undone' && (item.acquisition?.status !== 'attached' || item.attachmentUndone)).length;
+      const outputs = task.items.filter(hasOutput);
+      const savedItems = task.items.filter(item => item.kind === 'acquisition' && item.item && item.status !== 'undone').length;
+      const attachedPDFs = task.items.filter(item => item.kind === 'acquisition' && item.acquisition?.status === 'attached' && !item.attachmentUndone && item.status === 'applied').length;
       const done = task.items.filter(item => ['applied', 'metadata-only'].includes(item.status)).length;
       const verifiedOrganization = task.items.filter(item => item.kind === 'organization' && item.status === 'applied' && item.change).length;
-      const outcome = task.state === 'review' ? `${selectedItems.length}/${ready.length} selected${task.kind === 'organization' ? ' items' : ''}` : task.kind === 'annotations' ? `${done}/${task.items.length} annotations applied` : task.kind === 'organization' ? `${verifiedOrganization}/${task.items.length} items organized` : `${metadataOnly} metadata item(s) · ${task.items.filter(item => item.kind === 'acquisition' && item.acquisition?.status === 'attached' && !item.attachmentUndone && item.status === 'applied').length} PDFs attached`;
+      const outcome = task.state === 'review' ? `${selectedItems.length}/${ready.length} selected${task.kind === 'organization' ? ' items' : ''}` : task.kind === 'annotations' ? `${done}/${task.items.length} annotations applied` : task.kind === 'organization' ? `${verifiedOrganization}/${task.items.length} items organized` : `${savedItems} ${savedItems === 1 ? 'item' : 'items'} saved · ${attachedPDFs} ${attachedPDFs === 1 ? 'PDF' : 'PDFs'} attached`;
       const taskName = task.kind === 'annotations' ? 'Annotations' : task.kind === 'organization' ? 'Organize library' : 'Acquire literature';
       summary.textContent = `${taskName} · ${TASK_LABEL[task.state]} · ${outcome}`;
       const stateCounts = new Map<string, number>(); for (const item of task.items) { const label = item.kind === 'organization' ? itemOutcome(item) : ITEM_LABEL[item.status]; stateCounts.set(label, (stateCounts.get(label) ?? 0) + 1); }

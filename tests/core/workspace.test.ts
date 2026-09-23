@@ -404,15 +404,15 @@ it('resumes an interrupted inline migration without overwriting its already-crea
   expect(storedSettings(storage).skills.every(skill => !('markdown' in skill))).toBe(true);
 });
 
-it('persists the model allowlist through the real store so a new instance resolves the same allowed set', async () => {
+it('persists the current model allowlist through the real store and migrates absent settings', async () => {
   const storage = new MemoryStorage(); const store = new WorkspaceStore(storage, clock);
-  // A store that never touched the setting resolves the default 6 + 5.6 set.
+  // A store that never touched the setting resolves the three current GPT-6 models.
   expect((await store.settings()).allowedModels).toEqual(defaultAllowedModels());
   const value = await store.settings();
-  value.allowedModels = defaultAllowedModels().filter(model => model.id !== 'gpt-5.6-luna');
+  value.allowedModels = defaultAllowedModels().filter(model => model.id !== 'gpt-6-luna');
   await store.saveSettings(value);
   const reloaded = await new WorkspaceStore(storage, clock).settings();
-  expect(reloaded.allowedModels).toEqual([{ id: 'gpt-6-astra', name: 'GPT-6 Astra' }, { id: 'gpt-5.6-sol', name: 'GPT-5.6 Sol' }, { id: 'gpt-5.6-terra', name: 'GPT-5.6 Terra' }]);
+  expect(reloaded.allowedModels).toEqual([{ id: 'gpt-6-sol', name: 'GPT-6 Sol' }, { id: 'gpt-6-astra', name: 'GPT-6 Astra' }]);
   // A legacy record without the field loads as the default set and is migrated on read, like every
   // other additive settings field.
   const legacy = { ...defaultSettings() } as Partial<WorkspaceSettings>;
@@ -430,12 +430,12 @@ it('keeps an unknown or removed allowed model id without error and still resolve
   value.allowedModels = [...defaultAllowedModels(), { id: 'gpt-retired-x', name: 'GPT Retired X' }];
   await store.saveSettings(value);
   const reloaded = await new WorkspaceStore(storage, clock).settings();
-  expect(reloaded.allowedModels?.map(model => model.id)).toEqual(['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-retired-x']);
+  expect(reloaded.allowedModels?.map(model => model.id)).toEqual(['gpt-6-sol', 'gpt-6-astra', 'gpt-6-luna', 'gpt-retired-x']);
   expect(reloaded.allowedModels?.find(model => model.id === 'gpt-retired-x')?.name).toBe('GPT Retired X');
   // A repeated id is collapsed in order rather than making the whole settings record unreadable.
   value.allowedModels = [...defaultAllowedModels(), { id: 'gpt-retired-x', name: 'GPT Retired X' }, { id: 'gpt-retired-x', name: 'GPT Retired X' }];
   await store.saveSettings(value);
-  expect((await new WorkspaceStore(storage, clock).settings()).allowedModels?.map(model => model.id)).toEqual(['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-retired-x']);
+  expect((await new WorkspaceStore(storage, clock).settings()).allowedModels?.map(model => model.id)).toEqual(['gpt-6-sol', 'gpt-6-astra', 'gpt-6-luna', 'gpt-retired-x']);
 });
 
 it('refuses to persist an empty allowlist and leaves the stored record untouched', async () => {

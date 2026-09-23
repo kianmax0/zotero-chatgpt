@@ -163,27 +163,23 @@ it('offers the two paper copy controls as icon buttons and says the text is on t
   expect(feedbackOf(root).textContent).not.toMatch(/attached|uploaded|sent/iu);
 });
 
-it('discloses automatic current-PDF context before the first official-page submission', () => {
+it('discloses automatic paper metadata before the first official-page submission without asking for approval', () => {
   const { root, presenter } = mount('chat');
   presenter.snapshot().document.disclosure = true;
   presenter.snapshot().document.enabled = true;
-  const acknowledge = vi.spyOn(presenter, 'acknowledgeContext');
   presenter.setMode('chat');
   const strip = root.querySelector<HTMLElement>('[data-zchatgpt-embed-notice]')!;
   const notice = root.querySelector<HTMLElement>('[data-zchatgpt-embed-context-notice]')!;
-  const consent = root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="continue-with-pdf"]')!;
-  // The first outbound notice is a state, not a permanent row, and it does not claim a submission.
+  // The first outbound notice is informational and does not claim a submission.
   expect(strip.hidden).toBe(false);
   expect(notice.textContent).toContain('official ChatGPT');
-  expect(notice.textContent).toContain('current PDF');
+  expect(notice.textContent).toContain('stored abstract');
+  expect(notice.textContent).toContain('PDF body text is not added');
   expect(notice.textContent).toContain('Preferences');
-  expect(consent.hidden).toBe(false);
-  expect(consent.textContent).toBe('Allow PDF context');
-  consent.click();
-  expect(acknowledge).toHaveBeenCalledTimes(1);
+  expect(root.querySelector('[data-zchatgpt-action="continue-with-pdf"]')).toBeNull();
 });
 
-it('reports the automatic PDF state in the details without claiming a message was accepted', () => {
+it('reports the automatic paper context setting in the details without claiming a message was accepted', () => {
   const { root, presenter } = mount('chat');
   const strip = root.querySelector<HTMLElement>('[data-zchatgpt-embed-notice]')!;
   // Nothing outstanding: the strip is gone, so the header is a single row.
@@ -195,11 +191,11 @@ it('reports the automatic PDF state in the details without claiming a message wa
   root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="more-actions"]')!.click();
   root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="open-paper-details"]')!.click();
   const panel = root.querySelector<HTMLElement>('[data-zchatgpt-context-panel]')!;
-  expect(panel.textContent).toContain('Automatic PDF context On');
+  expect(panel.textContent).toContain('Automatic paper details and abstract On');
   expect(panel.textContent).not.toMatch(/accepted|attached|sent/iu);
   presenter.snapshot().document.enabled = false;
   presenter.setMode('chat');
-  expect(panel.textContent).toContain('Automatic PDF context Off');
+  expect(panel.textContent).toContain('Automatic paper details and abstract Off');
 });
 
 it('hands the real PDF file to the clipboard for the application\'s own paste-to-attach path', async () => {

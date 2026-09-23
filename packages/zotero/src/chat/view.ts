@@ -8,8 +8,9 @@ import { EXPLAIN_QUESTION } from '../../../core/src/codex/reader-policy.ts';
 import { hasBibliographicIdentity } from '../../../core/src/chat/paper-context.ts';
 import type { ConversationPresenter, PresenterState } from './presenter.ts';
 import {
-  applyComposerChoice, composerControls, effortLabel, modelChipLabel, resolveFastTier, settingsCaption,
+  alignSettings, applyComposerChoice, composerControls, effortLabel, modelChipLabel, resolveFastTier, settingsCaption,
 } from './generation-settings.ts';
+import { enforcedAllowedModelIds } from '../../../core/src/workspace/allowed-models.ts';
 import { copyableAnswerText, followAnswerScroll, renderAnswer } from './render-answer.ts';
 import { messageTimeLabel } from './message-time.ts';
 import { answerSources, linkAnswerSources, type AnswerSource, type DocumentPageTarget } from './source-links.ts';
@@ -149,12 +150,15 @@ const COPY = {
   documentReadAll: (total: number) => `Read all ${total} pages locally`,
   documentReadSome: (read: number, total: number) => `Read ${read} of ${total} pages locally`,
   documentReadNone: 'No text could be read from this PDF locally',
-  // One-line context summary in the common shell (UI-02/UI-03). It answers "what will the next
-  // message carry", and keeps the four facts apart: what was extracted locally, what is queued for
-  // the next send, whether the page accepted the last submission, and whether a real answer exists.
-  // Only the first two belong on this line; acceptance and answers stay with their own request.
+  // One-line context summary in the common shell (UI-02/UI-03). Chat names its bibliography and
+  // abstract scope; Agent names the locally read PDF pages. Acceptance and answers stay with their
+  // own request status rather than being inferred from this next-send description.
   contextLineSelected: (pageLabel: string) => `Selected text · page ${pageLabel}`,
   contextLineSelectedOff: 'Selected text · automatic PDF context off',
+  contextLineChatSelected: (pageLabel: string) => `Selected text · page ${pageLabel} · paper details and abstract when available`,
+  contextLineChatSelectedOff: (pageLabel: string) => `Selected text · page ${pageLabel} · automatic paper context off`,
+  contextLineChatMetadata: 'Paper details and stored abstract will be included when available · no PDF body text',
+  contextLineChatOff: 'Automatic paper context is off',
   contextLineOff: 'Automatic PDF context is off',
   contextLinePreparing: 'Preparing current PDF text…',
   contextLinePreparingPages: (done: number, total: number) => `Preparing current PDF text… ${done} of ${total} pages`,
@@ -169,6 +173,10 @@ const COPY = {
   contextPanelLocalRead: 'Read locally',
   contextPanelLocalReadValue: (read: number, total: number) => `${read} of ${total} pages have text`,
   contextPanelAutomatic: 'Automatic PDF context',
+  contextPanelAutomaticChat: 'Automatic paper details and abstract',
+  contextPanelAutomaticAgent: 'Automatic PDF text',
+  contextPanelChatScope: 'Chat sends available bibliography and stored abstract. PDF body text is excluded; explicitly selected text is included separately.',
+  contextPanelChatNoReport: 'Chat does not send PDF body text. Paper details and the stored abstract are included when available.',
   contextPanelAutomaticOn: 'On',
   contextPanelAutomaticOff: 'Off',
   contextPanelNoReport: 'The last request did not record a coverage report.',
@@ -225,11 +233,9 @@ const COPY = {
   embedFileFailed: 'The PDF file could not be copied.',
   moreActions: 'More actions',
   paperDetails: 'Paper & context details',
-  /** The first-outbound consent, kept as a state and shown inside the details, never as a header row. */
-  allowPdfContext: 'Allow PDF context',
-  embedAutomaticDisclosure: 'When you send in official ChatGPT, locally extracted text from the current PDF and the current Zotero selection are added to that message. Nothing is sent when you open the sidebar. You can turn this off in Zotero Preferences.',
-  /** First outbound scope notice. It describes the request scope, never a claim about what was read locally. */
-  sendScope: 'When you send, extracted text from this PDF, your selected text and attached images go to Codex through your ChatGPT account. Opening this sidebar only prepares local text. You can turn automatic PDF text off in Zotero\'s Preferences window.',
+  embedAutomaticDisclosure: 'When you send in official ChatGPT, the paper title, authors, publication, year, DOI and stored abstract are added when available. PDF body text is not added. A passage you explicitly select is included separately. Opening the sidebar sends nothing. You can turn automatic paper context off in Zotero Preferences.',
+  /** Agent's existing first-send scope approval remains separate from the hosted Chat notice. */
+  sendScope: 'When you send in Agent, extracted text from this PDF, your selected text and attached images go to Codex through your ChatGPT account. Opening this sidebar only prepares local text. You can turn automatic PDF text off in Zotero Preferences.',
   allowAndSend: 'Allow PDF context and send',
   /** History row actions. The menu states the real scope; one confirmation precedes the removal. */
   historyRowActions: 'Conversation actions',
@@ -616,8 +622,8 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   const contextSource = el('div', 'zchatgpt-chrome-source');
   contextSource.dataset.zchatgptContextSource = '';
   contextSource.hidden = true;
-  // The first outbound scope notice stays: it is the only way to acknowledge the disclosure, and
-  // without it an explain that needs consent can never send. It is a state, not a permanent banner.
+  // Agent's first outbound scope notice gates a pending explanation until the owner approves. The
+  // hosted Chat has a separate informational notice and never asks for sidebar confirmation.
   const scopeNotice = el('div', 'zchatgpt-context-disclosure');
   scopeNotice.dataset.zchatgptContextDisclosure = '';
   const scopeNoticeCopy = el('p', '', COPY.sendScope);
@@ -944,8 +950,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   /** Actor/readiness/submission lifecycle, written by the host when it cannot show the page. */
   const embedBridgeStatus = embedSection ? el('span', 'zchatgpt-embed-bridge-status') : null;
   const embedContextNotice = embedSection ? el('p', 'zchatgpt-embed-context-notice') : null;
-  const embedConsent = embedSection ? button(COPY.allowPdfContext, 'continue-with-pdf', () => presenter.acknowledgeContext()) : null;
-  if (embedSection && embedSlot && embedNotice && embedBridgeStatus && embedContextNotice && embedConsent) {
+  if (embedSection && embedSlot && embedNotice && embedBridgeStatus && embedContextNotice) {
     embedSection.dataset.zchatgptEmbed = '';
     embedSlot.dataset.zchatgptEmbedSlot = '';
     embedNotice.dataset.zchatgptEmbedNotice = '';
@@ -956,9 +961,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     embedContextNotice.setAttribute('data-zchatgpt-ui', 'true');
     embedContextNotice.textContent = COPY.embedAutomaticDisclosure;
     embedContextNotice.hidden = true;
-    embedConsent.dataset.zchatgptAction = 'continue-with-pdf';
-    embedConsent.hidden = true;
-    embedNotice.append(embedContextNotice, embedConsent, embedBridgeStatus);
+    embedNotice.append(embedContextNotice, embedBridgeStatus);
     embedSection.append(embedNotice, embedSlot);
     root.append(embedSection);
   }
@@ -1554,9 +1557,9 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   };
   let focusToken = 0; let contentKey = ''; let chromeKey = ''; let messageTimeKey = '';
   /**
-   * The one-line answer to "what will the next message carry" (UI-02/UI-03). The four facts stay
-   * separate: this line reports the local read and the next send, never whether the last page
-   * submission was accepted or whether a model answered. Counts come from the prepared pages, so
+   * The one-line answer to "what will the next message carry" (UI-02/UI-03). Chat reports available
+   * bibliography and abstract; Agent reports the local read and the next send. Neither says whether
+   * the last page submission was accepted or whether a model answered. Counts come from prepared pages, so
    * "all N" is only said when every page really carried text: a scanned page reported as empty still
    * counts against the total, and a partial read is never rounded up into a full one.
    */
@@ -1566,6 +1569,10 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     // turn keeps its own return-to-source line in the panel, but it must not be reported as the
     // scope of the next message.
     const pending = state.draft.citations.at(-1) ?? null;
+    if (state.mode === 'chat') {
+      if (pending) return enabled ? COPY.contextLineChatSelected(pageLabel(pending)) : COPY.contextLineChatSelectedOff(pageLabel(pending));
+      return enabled ? COPY.contextLineChatMetadata : COPY.contextLineChatOff;
+    }
     if (pending) return enabled ? COPY.contextLineSelected(pageLabel(pending)) : COPY.contextLineSelectedOff;
     if (!enabled) return COPY.contextLineOff;
     if (phase === 'preparing') return progress.total > 0 ? COPY.contextLinePreparingPages(progress.done, progress.total) : COPY.contextLinePreparing;
@@ -1579,13 +1586,14 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   };
   /**
    * The details panel behind the summary. It holds only what does not belong on a permanent row:
-   * the full source, the concrete read coverage, the automatic-PDF state (shown, never a fake
+   * Agent's concrete read coverage or Chat's metadata-only scope, the automatic-source state (shown, never a fake
    * toggle), the clipboard/primary-source actions the owner asked for, and the planner's own
    * coverage report when one exists. It is rebuilt only while it is open.
    */
   const renderContextPanel = (state: PresenterState, summary: string) => {
     const citation = activeCitation(state.draft.citations, state.conversation?.messages ?? []);
     const { enabled, prepared, phase } = state.document;
+    const isAgent = state.mode === 'agent';
     const read = prepared ? prepared.pages.filter(page => page.status === 'text' && page.text.length > 0).length : 0;
     const row = (label: string, value: string, content = false, attribute?: string): HTMLElement => {
       const line = el('p', 'zchatgpt-context-row');
@@ -1604,20 +1612,25 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     nodes.push(head);
     nodes.push(row(COPY.contextPanelSource, state.document.identity.title || state.document.attachment.title, true));
     nodes.push(row(COPY.contextPanelNextSend, summary, false, 'zchatgptContextSummary'));
-    if (prepared) nodes.push(row(COPY.contextPanelLocalRead, COPY.contextPanelLocalReadValue(read, prepared.totalPages)));
-    nodes.push(row(COPY.contextPanelAutomatic, enabled ? COPY.contextPanelAutomaticOn : COPY.contextPanelAutomaticOff));
+    if (isAgent && prepared) nodes.push(row(COPY.contextPanelLocalRead, COPY.contextPanelLocalReadValue(read, prepared.totalPages)));
+    nodes.push(row(isAgent ? COPY.contextPanelAutomaticAgent : COPY.contextPanelAutomaticChat, enabled ? COPY.contextPanelAutomaticOn : COPY.contextPanelAutomaticOff));
+    if (!isAgent) nodes.push(el('p', 'zchatgpt-context-panel-note', COPY.contextPanelChatScope));
     // The active citation's page and its back-to-source control keep their own node so the reader
     // navigation contract is unchanged; it is hidden whenever the draft carries no selection.
     nodes.push(contextSource);
     if (phase === 'error' && state.document.error) nodes.push(el('p', 'zchatgpt-context-panel-error', state.document.error));
     const actionsRow = el('div', 'zchatgpt-context-panel-actions');
-    actionsRow.append(button(COPY.reReadPdf, 're-read-pdf', () => {
-      contextPanelError.hidden = true;
-      void presenter.prepareContext().catch(error => { contextPanelError.textContent = actionFailure(error); contextPanelError.hidden = false; });
-    }));
-    nodes.push(actionsRow);
-    if (state.contextReport) nodes.push(contextDetailNodes(doc, state.contextReport));
-    else { const note = el('p', 'zchatgpt-context-panel-note', COPY.contextPanelNoReport); note.setAttribute('data-zchatgpt-ui', 'true'); nodes.push(note); }
+    if (isAgent) {
+      actionsRow.append(button(COPY.reReadPdf, 're-read-pdf', () => {
+        contextPanelError.hidden = true;
+        void presenter.prepareContext().catch(error => { contextPanelError.textContent = actionFailure(error); contextPanelError.hidden = false; });
+      }));
+      nodes.push(actionsRow);
+      if (state.contextReport) nodes.push(contextDetailNodes(doc, state.contextReport));
+      else { const note = el('p', 'zchatgpt-context-panel-note', COPY.contextPanelNoReport); note.setAttribute('data-zchatgpt-ui', 'true'); nodes.push(note); }
+    } else {
+      const note = el('p', 'zchatgpt-context-panel-note', COPY.contextPanelChatNoReport); note.setAttribute('data-zchatgpt-ui', 'true'); nodes.push(note);
+    }
     contextPanelBody.replaceChildren(...nodes);
     contextSource.hidden = !citation;
   };
@@ -2044,8 +2057,10 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   }
   const renderPicker = (state: PresenterState, signedIn: boolean) => {
     const models = state.runtime?.models ?? [];
-    const current = state.draft.settings ?? state.conversation?.settings ?? null;
-    const controls = composerControls(models, current);
+    const selectedSettings = state.draft.settings ?? state.conversation?.settings ?? null;
+    const allowedIds = enforcedAllowedModelIds(state.workspace?.allowedModels);
+    const current = selectedSettings && models.length ? alignSettings(models, selectedSettings, allowedIds) : selectedSettings;
+    const controls = composerControls(models, current, allowedIds);
     const selected = current ? models.find(entry => entry.id === current.model) : undefined;
     const fast = resolveFastTier(selected);
     /**
@@ -2079,7 +2094,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
         const latest = presenter.snapshot();
         const settings = latest.draft.settings ?? latest.conversation?.settings;
         if (!settings) return;
-        presenter.setSettings(applyComposerChoice(latest.runtime?.models ?? [], settings, 'effort', option.value));
+        presenter.setSettings(applyComposerChoice(latest.runtime?.models ?? [], settings, 'effort', option.value, enforcedAllowedModelIds(latest.workspace?.allowedModels)));
         keepPicker('effort', option.value);
       });
       effortSection.append(row);
@@ -2104,7 +2119,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
         const latest = presenter.snapshot();
         const settings = latest.draft.settings ?? latest.conversation?.settings;
         if (!settings) return;
-        presenter.setSettings(applyComposerChoice(latest.runtime?.models ?? [], settings, 'speed', on ? '' : fast.id));
+        presenter.setSettings(applyComposerChoice(latest.runtime?.models ?? [], settings, 'speed', on ? '' : fast.id, enforcedAllowedModelIds(latest.workspace?.allowedModels)));
         menu.querySelector<HTMLButtonElement>('[data-zchatgpt-setting="speed"]')?.focus();
       });
       row.append(toggle);
@@ -2129,7 +2144,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
         const latest = presenter.snapshot();
         const settings = latest.draft.settings ?? latest.conversation?.settings;
         if (!settings) return;
-        presenter.setSettings(applyComposerChoice(latest.runtime?.models ?? [], settings, 'model', option.value));
+        presenter.setSettings(applyComposerChoice(latest.runtime?.models ?? [], settings, 'model', option.value, enforcedAllowedModelIds(latest.workspace?.allowedModels)));
         keepPicker('model', option.value);
       });
       modelSection.append(row);
@@ -2161,7 +2176,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
      * one mode switch and the context summary — stays visible in both modes.
      */
     const embedActive = !!hooks.chatEmbed && state.mode === 'chat';
-    if (embedSection && embedSlot && embedNotice && embedContextNotice && embedConsent && embedBridgeStatus && hooks.chatEmbed) {
+    if (embedSection && embedSlot && embedNotice && embedContextNotice && embedBridgeStatus && hooks.chatEmbed) {
       root.dataset.zchatgptEmbedActive = String(embedActive);
       embedSection.hidden = !embedActive;
       chat.hidden = embedActive;
@@ -2175,12 +2190,10 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
       historyBtn.hidden = embedActive;
       reloadRow.hidden = !embedActive;
       if (embedActive) {
-        // The first-outbound disclosure is the only thing the strip shows in the normal case, and it
-        // stops taking space as soon as the owner acknowledges it. The automatic-PDF state itself is
-        // reported in the details, not in a permanent row.
+        // The first-send scope disclosure is informational: it stays visible until the first send
+        // attempt and never asks the owner to approve or acknowledge it in the sidebar.
         const disclosure = state.document.enabled && state.document.disclosure;
         embedContextNotice.hidden = !disclosure;
-        embedConsent.hidden = !disclosure;
         const bridgeSaysSomething = !embedBridgeStatus.hidden && !!embedBridgeStatus.textContent?.trim();
         embedNotice.hidden = !disclosure && !bridgeSaysSomething;
         hooks.chatEmbed.show(embedSlot);
@@ -2195,7 +2208,8 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     const visibleTasks = agentMode ? state.tasks : [];
     const uiLanguage = state.workspace?.uiLanguage ?? 'en';
     if (lastLanguage !== uiLanguage) { lastLanguage = uiLanguage; localizer.update(uiLanguage); }
-    // The consent prompt is a state, not a banner: it appears only when a request actually needs it.
+    // Only a pending Agent explanation waits for approval. Hosted Chat's pre-send scope notice is
+    // informational and lives beside the official composer.
     scopeNotice.hidden = !state.pendingExplain;
     acknowledgeScope.hidden = !state.pendingExplain;
     if (state.workspace) {
@@ -2377,12 +2391,12 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     }
     if (!composing && input.value !== state.draft.question) { input.value = state.draft.question; resizeInput(); }
     const signedIn = account === 'signedIn' && state.connection === 'ready';
-    const pickerKey = `${JSON.stringify(state.draft.settings ?? state.conversation?.settings ?? null)}\n${state.runtime?.models.map(entry => entry.id).join(',')}\n${signedIn}\n${JSON.stringify(state.runtime?.rateLimits ?? null)}`;
+    const pickerKey = `${JSON.stringify(state.draft.settings ?? state.conversation?.settings ?? null)}\n${JSON.stringify(state.workspace?.allowedModels ?? null)}\n${state.runtime?.models.map(entry => entry.id).join(',')}\n${signedIn}\n${JSON.stringify(state.runtime?.rateLimits ?? null)}`;
     if (menu.dataset.rendered !== pickerKey) {
       menu.dataset.rendered = pickerKey;
       renderPicker(state, signedIn);
     }
-    const summary = modelChipLabel(state.draft.settings ?? state.conversation?.settings ?? null, state.runtime?.models ?? []);
+    const summary = modelChipLabel(state.draft.settings ?? state.conversation?.settings ?? null, state.runtime?.models ?? [], enforcedAllowedModelIds(state.workspace?.allowedModels));
     if (picker.dataset.summary !== summary) {
       picker.dataset.summary = summary;
       picker.replaceChildren(doc.createTextNode(summary));
