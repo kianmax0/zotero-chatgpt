@@ -70,9 +70,10 @@ entry, and the PDF was attached by hand in the isolated library.
   of these steps ran. No Agent task was executed for this media, and no native write was performed.
 - **Processing**: drawn by hand as a self-contained SVG (no script, no external font, no remote
   resource). `agent-workflow.png` is a 1600 px wide render of the same file made with
-  `rsvg-convert`, kept in case a raster export is wanted; the README uses the SVG.
+  `rsvg-convert`, kept in case a raster export is wanted. The older review/approve highlighting
+  diagram is no longer featured in the README after explicit Agent highlights became automatic.
 
-## Library Agent acquisition stills (2026-09-23)
+## Library Agent acquisition stills from the earlier candidate (2026-09-23)
 
 - **Host and scope:** Zotero 9.0.6 on macOS Apple Silicon, in the dedicated
   `.zotero-chatgpt-dev/context-runs/demo-final-20260923/{profile,data}` tree. The collection

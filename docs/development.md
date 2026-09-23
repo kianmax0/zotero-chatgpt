@@ -93,7 +93,7 @@ prepare 脚本生成的 `driverSourceHash` 必须与本次工作树匹配，避�
 | `node scripts/prepare-host-test.mjs --context --run-id <id>` | 主窗口无 PDF 的 Agent 入口、本地 PDF、dock、模式、会话、上下文、偏好和安全边界；默认不发模型请求 |
 | `node scripts/prepare-host-test.mjs --context --native --run-id <id>` | 工作树原生适配器和合成条目/PDF；写入并撤销合成标注、标签、集合；不调用模型 |
 | `node scripts/prepare-host-test.mjs --context --live` | context 合成 PDF 上调用已登录 Codex，会使用实际额度；不接受 `--run-id` |
-| `node scripts/prepare-host-test.mjs --context --live --live-core-flows --login-wait-seconds <0..3600>` | 操作者完成官方 Agent 登录后，验证真实模型高亮/整理候选、review、写入、读回和冲突撤销 |
+| `node scripts/prepare-host-test.mjs --context --live --live-core-flows --login-wait-seconds <0..3600>` | 操作者完成官方 Agent 登录后，验证真实模型高亮候选经定位后自动原生写入、整理候选经 review/批准后写入，以及读回和冲突撤销 |
 | `node scripts/prepare-host-test.mjs --embed` | 官方 browser/actor 比较探测；不自动登录，不采集认证和回答正文 |
 | `node scripts/prepare-host-test.mjs --embed --web-live` | 官方页面 actor 的真实可见提交链路；不能与 URL/watch/comparison probe 参数合用 |
 | `node scripts/prepare-host-test.mjs --embed --watch-seconds <n>` | 比较探测后保留人工观察窗口；只记录白名单网络/console/surface 状态 |

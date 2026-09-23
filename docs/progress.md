@@ -5,6 +5,20 @@
 
 产品要求见 [zotero-chatgpt-user-flow.md](zotero-chatgpt-user-flow.md)，架构见 [module-design.md](module-design.md)，命令与状态定义见 [development.md](development.md)。
 
+## 2026-09-23 反馈修订候选（草稿 PR 后续）
+
+本轮针对用户在真实 Zotero 截图中反馈的模型设置、主窗口入口/面板和高亮流程继续修订；基线是下节的 `e0baff9f…` 候选。本节只记录新构建和本轮实测，不继承下节真实获取示例的产物身份。正式 Agent 默认 Sol，Astra/Luna 仍可手动选；Sol/Luna 强制门禁只用于节省真实模型测试用量。
+
+| 层级 | 状态 | 本轮证据与范围 |
+| --- | --- | --- |
+| 行为与源码 | PASS | Preferences 保存后立即刷新已打开侧栏的模型菜单及未发送草稿；正在运行的请求保持冻结模型。主窗口 Agent 按钮移到 Zotero 原生新建/标识符/附件/笔记按钮组右端；面板把“Get paper / Organize selection”分开，原任务记录仍可见。新 Agent annotate 请求的自动执行意图随请求和任务持久化，只对唯一定位且几何可靠的候选走原写入/读回/撤销；旧请求及旧任务保持人工 review。新注释清除内部来源链接，只留标识和简短解释。 |
+| 本地门禁 | PASS | 最终 diff 的 `npm run typecheck`、`npm run lint`、`npm run test:unit -- --maxWorkers=1`：106 files / **1423 tests** / 0 skipped；复审发现的面板重开焦点问题也有定向回归。`npm run package:dev`、`npm run verify:artifacts` 通过。最终 XPI `dist/zotero-chatgpt-0.1.1-dev.xpi`：99,556,600 bytes / 87 files；SHA-256 `b1de523489543a2b9cd1e7b1130c9b178d58742c57a77949c26c3317dd53c8f7`。 |
+| 真实 Zotero 无模型宿主 | PASS | Zotero 9.0.6、专用 `.zotero-chatgpt-dev/context-runs/feedback-final-b1de-20260923/`，报告 `host-report.json` 49/49，绑定上述最终 XPI SHA；无模型轮次。此前 `feedback-final-2dca-20260923/` 在 4 项通过后因 host driver 仍查找旧的 Close 按钮 aria-label 而 FAIL，原报告保留；只修驱动选择器后 `feedback-final-2dca-rerun-20260923/` 49/49，此后各产品修订均另用新 profile 对确切产物复核。 |
+| 真实 Sol/Luna 高亮、整理与 GIF | BLOCKED | 本轮没有发送模型请求。上一节专用 profile 的 live `model/list` 只有 Astra；用户表示稍后亲自完成官方登录。真实模型自动高亮、无二次批准的原生读回、选中项整理及经典论文 GIF 均需该步骤后验证，不能把确定性单测算作 demo。 |
+| 主窗口截图级视觉复核 | NOT RUN | 自动化界面本轮绑定到已存在的日常 Zotero 窗口，未在该窗口点击或截图；独立测试实例已按完整 profile 路径核对后停止。按钮位置由 Zotero 9.0.6 自带 `zoteroPane.xhtml` 结构、DOM 回归和无模型宿主入口检查支持；窄窗、主题、字号的最终外观仍待独立窗口复核。 |
+
+图表圈画、选中条目元数据补全、简介笔记及主窗口围绕所选文献的官方网页 Chat 仍是产品设计方向，见产品文档 §7.5；本轮没有把这些新写入能力标为完成。
+
 ## 2026-09-23 本地开发候选（尚未发行）
 
 基线是 GitHub `main` 的 `e951849`（`v0.1.1`）；本地先核对远端 SHA，再在 `codex/agent-library-and-context` 分支开发。manifest 仍为 `0.1.1`，所以本轮**只按内容 SHA 识别开发包**，不把旧发行版或较早的同版本 XPI 当作这次产物。没有公开 Release 或日常 profile 安装。

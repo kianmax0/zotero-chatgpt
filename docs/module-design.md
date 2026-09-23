@@ -173,7 +173,9 @@ ReaderContext 沿用适配层聚合：组合既有身份、DocumentContext 和�
 
 使用冻结 PDF 的原生字符盒生成行矩形，跨页只允许相邻两页。候选重复、仍由历史任务拥有的输出或写入结果不明时，不能分配第二个写 key；只有确认原输出已撤销、对应所有权解除后才允许重新创建。
 
-批准前只保存 review；批准后先保存 reserved key 与 `annotation-create` writing 意图，再调用 `Annotations.saveFromJSON`，最后按 key 读回完整原生快照。写前再次验证 quote 与 revision，不信任账本中的旧坐标。writing/unknown 恢复先 inspect，不重发。
+新发送的 Agent annotate 请求在冻结 workflow 中标明自动执行意图，并随模型请求持久化；只有此标记存在时，返回候选才创建带同一意图的任务。冻结 quote 经唯一匹配与几何验证后，只把已解析且未重复的候选交给原有写入控制器；不再等待第二次人工批准。旧请求和旧任务没有该意图，保持原有 review 状态，不在升级或恢复时静默写入。写入前先保存 reserved key 与 `annotation-create` writing 意图，再调用 `Annotations.saveFromJSON`，最后按 key 读回完整原生快照。写前再次验证 quote 与 revision，不信任账本中的旧坐标。writing/unknown 恢复先 inspect，不重发。
+
+注释正文只含插件 provenance 与经清理的简短理由；模型返回的内部来源链接、页码定位和验证状态留在任务/来源数据中，不嵌入 Zotero annotation comment。历史任务已保存的 comment 仍按其原始字节核对，以免破坏读回与撤销。
 
 原文跳转将第一页 rects 与相邻第二页 `nextPageRects` 一次交给 Reader.navigate，不修改缩放或旋转。撤销要求标注仍精确匹配写后快照并带本插件 provenance，否则 conflict。
 
@@ -200,6 +202,8 @@ OA 下载由受控宿主动作执行。逐跳校验公网 URL，拒绝私网/本
 ## 8. 设置、历史与兼容
 
 共用设置只控制插件共有行为。Agent 模型、instructions、skills 和生成设置不影响官网模型或官网个人设置。新请求的模型选择只取运行时当前报告的 GPT-6 Sol、Astra、Luna，默认优先 Sol；已有记录的旧模型身份只读保留。原始 model ID 必须与实际运行时能力一致；缓存、随包目录和已确认能力分开显示。
+
+Preferences 保存 Agent 模型白名单后要刷新所有已打开的 Reader composer，使下一次请求立即采用新设置；已发送或正在运行的请求保持发送时冻结的模型。独立运行的文献库 Agent 也在每次新请求读取最新设置，不通过重启 Zotero 才生效。
 
 历史索引只索引本地确实拥有的字段。官方远端 transcript 仍由官网拥有，不为 UI 的“统一历史”要求新增采集。删除通过唯一存储所有者执行，先检查活动 request/task/reading job；会话删除不调用原生撤销，也不顺便清理账户目录。
 

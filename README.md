@@ -18,17 +18,11 @@ Explain a passage, unpack a derivation, or ask a follow-up—right beside your P
 
 ## Put Agent to work
 
-Highlight key passages. Organize selected papers with tags and collections. From Zotero's library window, open **Zotero Agent** to add a paper from a DOI or public article URL without opening a PDF first. Preview and approve changes before they reach your library.
+Highlight key passages. Organize selected papers with tags and collections. From Zotero's library window, open **Zotero Agent** to add a paper from a DOI or public article URL without opening a PDF first. Explicit Agent highlight requests apply only after the quoted passages are verified against the PDF; each result can be located or undone. Library acquisition and organization still show a review before writing.
 
 > “Highlight the five most important passages and explain why.”
 
-![Agent reviewing a public DOI in the Zotero library window before saving anything.](docs/media/agent-acquisition-review.png)
-
-*Agent acquisition demo in a dedicated Zotero test library: [open from My Library](docs/media/agent-library-entry.png) → review the verified metadata → [see the saved result](docs/media/agent-acquisition-result.png). The PLOS article gained a verified PDF; a second DOI saved metadata and accurately reported that no OA PDF was available. No Codex model turn was used for this DOI workflow.*
-
-![Illustrated Agent workflow: request, review, approve, and apply changes in Zotero.](docs/media/agent-workflow.svg)
-
-*Illustrated highlighting workflow; the live model highlight demo is still pending verification.*
+In an isolated Zotero test library, a public PLOS DOI was reviewed and saved as a native item with a verified PDF attachment. The refreshed main-window interface and a live model highlight GIF are still awaiting visual capture in the dedicated test profile.
 
 Agent is experimental; fetching open-access PDFs from a DOI or article link is still being refined.
 
