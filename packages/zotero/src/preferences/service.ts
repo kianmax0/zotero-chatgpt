@@ -13,6 +13,8 @@ export interface PreferencesServiceHost {
   /** The plugin preference `extensions.zchatgpt.automaticPdfText`; not part of the workspace store. */
   readAutomaticPdfText(): boolean;
   writeAutomaticPdfText(enabled: boolean): void;
+  /** Notify live reader presenters after the workspace settings snapshot has been durably saved. */
+  settingsChanged?(settings: WorkspaceSettings): void;
   /**
    * The model ids the running Codex runtime last reported, or null when it is not running. Optional
    * and strictly read-only: opening the Preferences window must never start a runtime, and a host
@@ -70,6 +72,8 @@ export function createPreferencesService(host: PreferencesServiceHost): Preferen
     async writeSettings(json: string): Promise<void> {
       const value = parseSettings(json);
       await (await host.workspace()).saveSettings(value);
+      // This is a post-commit notification: failed writes must never update the live composer.
+      host.settingsChanged?.(value);
     },
     async setSkillEnabled(id: string, enabled: boolean): Promise<void> {
       if (typeof enabled !== 'boolean') throw new ReaderError('INVALID_REQUEST', 'A skill is either enabled or disabled.');

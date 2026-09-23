@@ -22,14 +22,14 @@ async function runHostSmoke(config) {
       const record = JSON.parse(await IOUtils.readUTF8(file));
       for (const request of record.requests ?? []) {
         const user = (record.messages ?? []).find(message => message.role === 'user' && message.requestId === request.requestId);
-        rows.push({ requestId: request.requestId, state: request.state, workflow: user?.workflow?.skill?.workflow ?? null });
+        rows.push({ requestId: request.requestId, state: request.state, workflow: user?.workflow?.skill?.workflow ?? null, model: user?.settings?.model ?? null });
       }
     }
     return rows;
   };
   try {
     await Zotero.initializationPromise;
-    const profile = String(config.profile); const match = profile.match(/^(.*\/\.zotero-chatgpt-dev\/context)\/profile$/u);
+    const profile = String(config.profile); const match = profile.match(/^(.*\/\.zotero-chatgpt-dev\/(?:context|context-runs\/[a-z0-9][a-z0-9-]{0,63}))\/profile$/u);
     await check('dedicated-preserved-context-profile', PathUtils.profileDir === profile && Boolean(match) && config.dataDir === `${match?.[1]}/data` && Zotero.DataDirectory.dir === config.dataDir);
     const win = await until(() => Zotero.getMainWindow(), 'main-window'); await until(() => win.ZoteroPane?.loaded && win.ZoteroPane?.itemsView, 'library-ready');
     const { AddonManager } = ChromeUtils.importESModule('resource://gre/modules/AddonManager.sys.mjs'); const addon = await AddonManager.getAddonByID(config.subjectID);
@@ -55,6 +55,20 @@ async function runHostSmoke(config) {
     if (panel().dataset.zchatgptAuth !== 'signedIn') { report.status = 'blocked'; report.blockedStage = 'official-agent-login'; report.finishedAt = new Date().toISOString(); await save(); return; }
     await delay(2500); const afterLogin = await requestSnapshot();
     await check('login-starts-no-incidental-request', afterLogin.length === beforeLogin.length, { before: beforeLogin.length, after: afterLogin.length });
+    // Live acceptance must use the workhorse/efficient models, never the most costly Astra fallback.
+    const picker = panel().querySelector('[data-zchatgpt-picker]');
+    click(picker);
+    const modelRow = id => panel()?.querySelector(`[data-zchatgpt-setting="model"][data-zchatgpt-value="${id}"]`);
+    const lowCostModel = await until(() => [modelRow('gpt-6-sol'), modelRow('gpt-6-luna')].find(row => row && !row.disabled) ?? null, 'enabled-sol-or-luna-model-option', 10000).catch(() => null);
+    report.offeredModelRows = [...(panel()?.querySelectorAll('[data-zchatgpt-setting="model"]') ?? [])].map(row => ({ id: row.dataset.zchatgptValue ?? '', disabled: row.disabled === true })).filter(row => row.id);
+    await save();
+    if (!lowCostModel) {
+      report.status = 'blocked'; report.blockedStage = 'sol-or-luna-model-unavailable'; report.finishedAt = new Date().toISOString(); await save(); return;
+    }
+    click(lowCostModel);
+    report.testModel = lowCostModel.dataset.zchatgptValue;
+    await check('low-cost-test-model-selected', report.testModel === 'gpt-6-sol' || report.testModel === 'gpt-6-luna', { model: report.testModel });
+    if (picker.getAttribute('aria-expanded') === 'true') click(picker);
     const baselineIDs = new Set(afterLogin.map(request => request.requestId));
     const taskCard = label => [...panel().querySelectorAll('[data-zchatgpt-task-id]')].find(card => String(card.querySelector('summary')?.textContent ?? '').includes(label));
     const send = async (question, label, afterClick) => {
@@ -66,11 +80,9 @@ async function runHostSmoke(config) {
     };
     const annotationsBefore = attachment.getAnnotations().length;
     await send('Highlight the five most important scientifically meaningful sentences in the current PDF. Use native Zotero highlights and propose only exact quotations that appear verbatim in this PDF.', 'annotation');
-    const annotationCard = await until(() => { const card = taskCard('Annotations'); return card?.dataset.state === 'review' ? card : null; }, 'annotation-review-terminal-preparation', 60000); await attachment.loadAllData();
-    const annotationReview = { state: annotationCard.dataset.state, candidates: annotationCard.querySelectorAll('[data-zchatgpt-task-item-id]').length, approveDisabled: annotationCard.querySelector('[data-zchatgpt-task-action="approve"]').disabled, nativeAnnotationsBefore: annotationsBefore, nativeAnnotationsCurrent: attachment.getAnnotations().length };
-    await check('annotation-review-before-write', annotationReview.state === 'review' && annotationReview.candidates === 5 && !annotationReview.approveDisabled && annotationReview.nativeAnnotationsCurrent === annotationsBefore, annotationReview);
-    annotationCard.open = true; click(annotationCard.querySelector('[data-zchatgpt-task-action="approve"]')); await until(() => annotationCard.dataset.state === 'completed', 'annotation-applied', 60000); await attachment.loadAllData();
-    await check('annotation-native-readback', attachment.getAnnotations().length - annotationsBefore === 5, { created: attachment.getAnnotations().length - annotationsBefore });
+    const annotationCard = await until(() => { const card = taskCard('Annotations'); return card && ['completed', 'partial', 'failed'].includes(card.dataset.state) ? card : null; }, 'annotation-auto-applied', 60000); await attachment.loadAllData();
+    const createdAnnotations = attachment.getAnnotations().length - annotationsBefore;
+    await check('annotation-auto-apply-native-readback', ['completed', 'partial'].includes(annotationCard.dataset.state) && createdAnnotations > 0 && createdAnnotations <= 5 && annotationCard.querySelector('[data-zchatgpt-task-action="approve"]')?.hidden === true, { state: annotationCard.dataset.state, created: createdAnnotations, candidates: annotationCard.querySelectorAll('[data-zchatgpt-task-item-id]').length });
     annotationCard.open = true; click(annotationCard.querySelector('[data-zchatgpt-task-action="undo"]')); await until(() => annotationCard.dataset.state === 'undone', 'annotation-undone', 60000); await attachment.loadAllData();
     await check('annotation-undo-readback', attachment.getAnnotations().length === annotationsBefore);
     const proposedTag = `live-organized-${token}`; const laterTag = `later-edit-${token}`;
@@ -86,7 +98,7 @@ async function runHostSmoke(config) {
     peer.addTag(laterTag); await peer.saveTx({ skipSelect: true }); organizationCard.open = true; click(organizationCard.querySelector('[data-zchatgpt-task-action="undo"]')); await until(() => organizationCard.dataset.state === 'conflict', 'organization-undo-conflict', 60000); await Promise.all([parent.loadAllData(), peer.loadAllData()]);
     await check('organization-undo-preserves-later-edit', !tags(parent).includes(proposedTag) && !collections(parent).includes(target.key) && tags(peer).includes(proposedTag) && tags(peer).includes(laterTag) && collections(peer).includes(target.key));
     const finalRequests = await requestSnapshot(); const issued = finalRequests.filter(request => !baselineIDs.has(request.requestId)); const workflows = issued.map(request => request.workflow).sort();
-    await check('exactly-two-authorized-model-requests', report.modelTurnsStarted === 2 && issued.length === 2 && issued.every(request => request.state === 'completed') && JSON.stringify(workflows) === JSON.stringify(['annotate', 'organize']), { modelTurnsStarted: report.modelTurnsStarted, requests: issued });
+    await check('exactly-two-authorized-model-requests', report.modelTurnsStarted === 2 && issued.length === 2 && issued.every(request => request.state === 'completed' && request.model === report.testModel) && JSON.stringify(workflows) === JSON.stringify(['annotate', 'organize']), { modelTurnsStarted: report.modelTurnsStarted, requests: issued });
     report.status = 'passed'; report.finishedAt = new Date().toISOString(); await save();
   } catch (error) {
     report.status = 'failed'; report.failedStep = step; report.failureClass = String(error?.name ?? 'Error').slice(0, 80); report.finishedAt = new Date().toISOString();

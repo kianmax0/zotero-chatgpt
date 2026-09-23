@@ -27,6 +27,7 @@ export interface NativeHostItem {
   isPDFAttachment(): boolean;
   isEditable(operation?: 'edit' | 'erase'): boolean;
   getField(field: string): string;
+  setField(field: string, value: string): void;
   getCreators(): Array<{ firstName?: string; lastName?: string; name?: string; creatorType?: string; fieldMode?: number }>;
   getCreatorsJSON(): Array<{ firstName?: string; lastName?: string; name?: string; creatorType?: string }>;
   getExtraField?(field: string): string | false;
@@ -38,6 +39,8 @@ export interface NativeHostItem {
   toJSON(): object;
   getFilePathAsync(): Promise<string | false>;
   fromJSON(json: object): void;
+  getNote(): string;
+  setNote(note: string): void;
   loadPrimaryData(): Promise<void>;
   addToCollection(key: string): void;
   removeFromCollection(key: string): void;
@@ -48,6 +51,18 @@ export interface NativeHostItem {
   erase(): Promise<void>;
 }
 export interface NativeHostCollection { id: number; key: string; libraryID: number; deleted?: boolean; isEditable(): boolean }
+export interface NativeHostCollection {
+  name: string;
+  parentID: number | false | null;
+  parentKey: string | false | null;
+  dateModified: string;
+  toJSON(): object;
+  loadDataType(type: 'primaryData' | 'childItems' | 'childCollections', reload?: boolean): Promise<void>;
+  getChildItems(asIDs?: boolean, includeTrashed?: boolean): Array<number | NativeHostItem>;
+  getChildCollections(asIDs?: boolean, includeTrashed?: boolean): Array<number | NativeHostCollection>;
+  save(options?: { skipSelect?: boolean }): Promise<number | boolean>;
+  saveTx(options?: { skipSelect?: boolean }): Promise<number | boolean>;
+}
 interface TranslatorBase {
   getTranslators(): Promise<Array<{ translatorID: string }>>;
   setTranslator(translator: Array<{ translatorID: string }> | { translatorID: string }): void;
@@ -69,6 +84,7 @@ export interface HostHTTPOptions {
 export interface HostHTTPResponse { response: unknown; status: number; responseURL: string; getResponseHeader?(name: string): string | null }
 export interface NativeZoteroHost {
   Item: new (itemType: string) => NativeHostItem;
+  Collection: new () => NativeHostCollection;
   Items: {
     getByLibraryAndKey(libraryID: number, key: string): NativeHostItem | false | undefined;
     get(id: number): NativeHostItem | false | undefined;
@@ -77,10 +93,16 @@ export interface NativeZoteroHost {
   Collections: {
     getByLibraryAndKey(libraryID: number, key: string): NativeHostCollection | false | undefined;
     get(id: number): NativeHostCollection | false | undefined;
+    getByLibrary(libraryID: number, recursive: boolean, includeTrashed: boolean): NativeHostCollection[];
   };
   Libraries: { get(id: number): { editable: boolean; filesEditable: boolean } | undefined };
   DB: { executeTransaction<T>(callback: () => Promise<T>): Promise<T> };
-  Annotations: { saveFromJSON(attachment: NativeHostItem, json: object, options?: { skipSelect?: boolean }): Promise<NativeHostItem> };
+  Annotations: {
+    saveFromJSON(attachment: NativeHostItem, json: object, options?: { skipSelect?: boolean }): Promise<NativeHostItem>;
+    saveCacheImage(item: NativeHostItem, image: Blob): Promise<string>;
+    removeCacheImage(item: Pick<NativeHostItem, 'libraryID' | 'key'>): Promise<void>;
+    toJSON(item: NativeHostItem): Promise<Record<string, unknown>>;
+  };
   Search: new () => { libraryID: number; addCondition(condition: string, operator: string, value?: string): void; search(): Promise<number[]> };
   Reader: { _readers: HostReader[] };
   Utilities: {

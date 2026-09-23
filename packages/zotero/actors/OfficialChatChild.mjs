@@ -203,7 +203,7 @@ export class ZoteroChatGPTOfficialChatChild extends JSWindowActorChild {
       }
       const composer = findChatGPTComposer(originalDocument);
       if (!composer || composer !== originalComposer) { this.sendAsyncMessage('status', { status: 'composer-missing', marker: prepared.marker ?? null }); return { status: 'blocked', reason: 'composer-missing' }; }
-      // The owner may keep typing while local PDF extraction runs. Preserve those edits and require
+      // The owner may keep typing while local metadata is read. Preserve those edits and require
       // another deliberate send instead of replacing them with the older frozen question.
       if (readChatGPTComposer(composer) !== originalDraft) {
         this.sendAsyncMessage('status', { status: 'context-blocked', marker: prepared.marker ?? null, reason: 'draft-changed' });
@@ -250,7 +250,7 @@ export class ZoteroChatGPTOfficialChatChild extends JSWindowActorChild {
         }
       }
       const accepted = await this.waitForMarker(prepared.marker, originalDocument, originalWindow);
-      const acceptedStatus = prepared.status === 'prepared' ? 'accepted' : 'accepted-without-context';
+      const acceptedStatus = prepared.status === 'prepared' && prepared.hasAutomaticContext ? 'accepted' : 'accepted-without-context';
       this.sendAsyncMessage('status', { status: accepted ? acceptedStatus : 'not-accepted', marker: prepared.marker });
       return { status: accepted ? 'accepted' : 'not-accepted', attempts };
     } finally {

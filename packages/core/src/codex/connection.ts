@@ -38,7 +38,7 @@ export async function openCodexConnection(process: ManagedProcess, options: Code
     const response = record(await rpc.request('initialize', { clientInfo: { name: 'zotero_chatgpt', title: 'Zotero ChatGPT', version: options.pluginVersion ?? 'unknown' }, capabilities: { experimentalApi: false } }));
     // The bundled macOS runtime is pinned, while Linux reports the installed CLI as `system`.
     // In the latter case accept a semantic Codex version from the initialize handshake.
-    const expectedVersion = options.codexVersion === '0.154.0' ? /^[^/]+\/0\.154\.0(?:\s|$)/u : /^[^/]+\/\d+\.\d+\.\d+(?:[-+][^\s]+)?(?:\s|$)/u;
+    const expectedVersion = options.codexVersion === '0.156.1' ? /^[^/]+\/0\.156\.1(?:\s|$)/u : /^[^/]+\/\d+\.\d+\.\d+(?:[-+][^\s]+)?(?:\s|$)/u;
     if (typeof response.userAgent !== 'string' || !expectedVersion.test(response.userAgent)) throw new RuntimeFailure('Unsupported runtime version');
     const codexHome = typeof response.codexHome === 'string' ? response.codexHome : '';
     if (!codexHome.startsWith('/') || (options.codexHome !== undefined && options.codexHome !== codexHome)) throw new RuntimeFailure('Reader policy unavailable: the runtime is not using the dedicated account directory');

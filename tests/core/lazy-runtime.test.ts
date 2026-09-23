@@ -36,7 +36,7 @@ function fakeChat(options: { fail?: string } = {}): ChatTransport & { requests: 
 async function setup(configure?: (options: { chatTransport?: ChatTransport }) => Partial<Parameters<typeof createReaderClient>[2]>) {
   const s = server();
   const overrides = configure?.({}) ?? {};
-  const c = await createReaderClient(s.p, new MemoryStorage(), { codexVersion: '0.154.0', cwd: '/isolated', uuid, loginTimeoutMs: 1000, deltaFlushMs: 1, now: () => '2026-09-09T08:00:00.000Z', ...overrides });
+  const c = await createReaderClient(s.p, new MemoryStorage(), { codexVersion: '0.156.1', cwd: '/isolated', uuid, loginTimeoutMs: 1000, deltaFlushMs: 1, now: () => '2026-09-09T08:00:00.000Z', ...overrides });
   clients.push(c);
   return { ...s, c };
 }

@@ -1,15 +1,16 @@
 import { expect, it } from 'vitest';
-import { NATIVE_ANNOTATION_PROVENANCE, NativeOperationError, type NativeActionPort, type NativeAnnotationSnapshot, type NativeAttachmentSnapshot, type NativeItemSnapshot, type NativeMetadata, type NativeOrganizationItemSnapshot } from '../../packages/contracts/src/native.ts';
+import { NATIVE_ANNOTATION_PROVENANCE, NativeOperationError, type NativeActionPort, type NativeAnnotationSnapshot, type NativeAttachmentSnapshot, type NativeChildNoteSnapshot, type NativeCollectionSnapshot, type NativeFigureCalloutInput, type NativeFigureCalloutSnapshot, type NativeItemSnapshot, type NativeMetadata, type NativeOrganizationItemSnapshot } from '../../packages/contracts/src/native.ts';
 import { ActionTaskController } from '../../packages/core/src/tasks/controller.ts';
-import { parseAnnotationCandidates } from '../../packages/contracts/src/tasks.ts';
+import { childNoteHTML, parseAnnotationCandidates, parseFigureCalloutProposals, validateAnnotationProposal } from '../../packages/contracts/src/tasks.ts';
 import { MemoryStorage, flush } from './doubles.ts';
-import { paperA } from '../contracts/factories.ts';
+import { imageA, paperA } from '../contracts/factories.ts';
 const revision = { fingerprint: 'synthetic', size: 1024, modifiedAt: 1000 };
 const metadata: NativeMetadata = { itemType: 'journalArticle', title: 'A synthetic article', DOI: '10.1234/example', creators: [] };
 const target = { clientId: paperA.clientId, libraryId: paperA.libraryId, collectionKey: 'COLLECT1' };
 function fixture() {
   let id = 0; let key = 0;
-  const storage = new MemoryStorage(); const annotations = new Map<string, NativeAnnotationSnapshot>(); const items = new Map<string, NativeItemSnapshot>();
+  const storage = new MemoryStorage(); const annotations = new Map<string, NativeAnnotationSnapshot>(); const items = new Map<string, NativeItemSnapshot>(); const notes = new Map<string, NativeChildNoteSnapshot>(); const collections = new Map<string, NativeCollectionSnapshot>();
+  const figureCallouts = new Map<string, NativeFigureCalloutSnapshot>(); let figureWriteUncertain = false; let figureCreates = 0;
   const attachments = new Map<string, NativeAttachmentSnapshot>();
   const clock = { now: () => '2026-09-12T10:00:00.000Z', uuid: () => `12345678-0000-4000-8000-${String(++id).padStart(12, '0')}`, key: () => `K${String(++key).padStart(7, '0')}` };
   let creates = 0; let afterAnnotation: (() => Promise<void>) | null = null; let downloadFails = true;
@@ -22,16 +23,61 @@ function fixture() {
       annotations.set(input.key, structuredClone(saved)); if (afterAnnotation) await afterAnnotation(); return saved;
     },
     inspectAnnotation: input => Promise.resolve(structuredClone(annotations.get(input.key) ?? null)),
+    inspectFigureCallout: input => { const value = figureCallouts.get(input.imageKey); return Promise.resolve(value ? { status: 'complete', callout: structuredClone(value) } : { status: 'absent' }); },
+    createFigureCallout: (input: NativeFigureCalloutInput) => {
+      figureCreates++;
+      const [x0, y0, x1, y1] = input.selection.rect; const w = x1 - x0; const h = y1 - y0; const box = input.proposal.box;
+      const rect: [number, number, number, number] = [x0 + box[0] * w, y1 - box[3] * h, x0 + box[2] * w, y1 - box[1] * h];
+      const label = String.fromCharCode(65 + input.index); const imageSHA256 = 'a'.repeat(64); const dateModified = '2026-09-23T00:00:00.000Z';
+      const callout: NativeFigureCalloutSnapshot = { selection: structuredClone(input.selection),
+        image: { paper: input.selection.paper, key: input.imageKey, type: 'image', comment: `${NATIVE_ANNOTATION_PROVENANCE}\n${label}: ${input.proposal.explanation}`, color: '#7c5cff', pageLabel: '1', sortIndex: '00000|000000|00000', position: { pageIndex: input.selection.pageIndex, rects: [rect] }, authorName: '', isExternal: false, tags: [], dateModified, imageSHA256 },
+        ink: { paper: input.selection.paper, key: input.inkKey, type: 'ink', comment: `${NATIVE_ANNOTATION_PROVENANCE}\n${label} callout`, color: '#7c5cff', pageLabel: '1', sortIndex: '00000|000000|00000', position: { pageIndex: input.selection.pageIndex, paths: input.proposal.strokes.map(stroke => stroke.flatMap(([x, y]) => [x0 + x * w, y1 - y * h])), width: 2.5 }, authorName: '', isExternal: false, tags: [], dateModified, imageSHA256 },
+      };
+      figureCallouts.set(input.imageKey, structuredClone(callout));
+      if (figureWriteUncertain) throw new NativeOperationError('WRITE_UNCERTAIN', 'Stored before timeout.');
+      return Promise.resolve(callout);
+    },
+    deleteFigureCallout: input => { const current = figureCallouts.get(input.expected.image.key); if (!current) return Promise.resolve({ status: 'absent' }); if (JSON.stringify(current) !== JSON.stringify(input.expected)) return Promise.resolve({ status: 'conflict' }); figureCallouts.delete(input.expected.image.key); return Promise.resolve({ status: 'deleted' }); },
     deleteAnnotation: input => { const current = annotations.get(input.expected.key); if (!current) return Promise.resolve({ status: 'absent' }); if (JSON.stringify(current) !== JSON.stringify(input.expected)) return Promise.resolve({ status: 'conflict', current }); annotations.delete(input.expected.key); return Promise.resolve({ status: 'deleted' }); },
     previewMetadata: input => Promise.resolve({ identifier: input.identifier, source: 'identifier', candidates: [structuredClone(metadata)] }),
     findDuplicateDOI: () => Promise.resolve([...items.values()].map(item => structuredClone(item))),
     inspectItem: input => Promise.resolve(structuredClone(items.get(input.key) ?? null)),
+    inspectCollection: input => Promise.resolve(structuredClone(collections.get(input.collectionKey) ?? null)),
+    inspectChildNote: input => Promise.resolve(structuredClone(notes.get(input.key) ?? null)),
     inspectOrganizationItem: input => {
       const item = items.get(input.key); return Promise.resolve(item ? { ...structuredClone(item), tags: [], organizationSignature: item.contentSignature } : null);
     },
     createItem: input => {
       const saved: NativeItemSnapshot = { clientId: input.target.clientId, libraryId: input.target.libraryId, key: input.key, metadata: structuredClone(input.metadata), collectionKeys: [input.target.collectionKey], attachmentKeys: [], dateModified: '2026-09-12 10:00:00', contentSignature: 'unchanged' };
       items.set(input.key, structuredClone(saved)); return Promise.resolve(saved);
+    },
+    createCollection: input => {
+      const value: NativeCollectionSnapshot = { clientId: input.target.clientId, libraryId: input.target.libraryId, collectionKey: input.key, name: input.name, parentKey: input.target.parentCollectionKey, childItemKeys: [], childCollectionKeys: [], dateModified: '2026-09-12 10:00:00', contentSignature: 'created-collection' };
+      collections.set(value.collectionKey, structuredClone(value)); return Promise.resolve(value);
+    },
+    undoCreatedCollection: input => {
+      const current = collections.get(input.expected.collectionKey); if (!current) return Promise.resolve({ status: 'absent' });
+      if (JSON.stringify(current) !== JSON.stringify(input.expected) || current.childItemKeys.length || current.childCollectionKeys.length) return Promise.resolve({ status: 'conflict' });
+      collections.delete(current.collectionKey); return Promise.resolve({ status: 'trashed' });
+    },
+    fillMissingMetadata: input => {
+      const before = structuredClone(items.get(input.expected.key)!); const after = structuredClone(before);
+      after.metadata = { ...after.metadata, ...input.fields }; after.contentSignature = `filled-${after.contentSignature}`; items.set(after.key, after);
+      return Promise.resolve({ before, after: structuredClone(after), fields: structuredClone(input.fields) });
+    },
+    undoMetadataFill: input => {
+      const current = items.get(input.expected.after.key); if (!current) return Promise.resolve({ status: 'absent' });
+      if (JSON.stringify(current) !== JSON.stringify(input.expected.after)) return Promise.resolve({ status: 'conflict' });
+      const before = structuredClone(input.expected.before); before.contentSignature = `restored-${current.contentSignature}`; items.set(before.key, before); return Promise.resolve({ status: 'removed' });
+    },
+    createChildNote: input => {
+      const note = { clientId: input.parent.clientId, libraryId: input.parent.libraryId, key: input.key, parentKey: input.parent.key, body: childNoteHTML(input.body), contentSignature: 'note-content' };
+      notes.set(note.key, structuredClone(note)); return Promise.resolve(note);
+    },
+    undoChildNote: input => {
+      const current = notes.get(input.expected.key); if (!current) return Promise.resolve({ status: 'absent' });
+      if (JSON.stringify(current) !== JSON.stringify(input.expected)) return Promise.resolve({ status: 'conflict' });
+      notes.delete(input.expected.key); return Promise.resolve({ status: 'trashed' });
     },
     addItemToCollection: input => {
       const before = items.get(input.expected.key)!; const after = { ...structuredClone(before), collectionKeys: [...new Set([...before.collectionKeys, input.target.collectionKey])] };
@@ -67,13 +113,53 @@ function fixture() {
   };
   const controller = new ActionTaskController(storage, native, clock);
   const plan = (count = 1) => controller.planAnnotations({ conversationId: 'conversation-a', paper: paperA, revision, question: 'Mark the definitions.', candidates: Array.from({ length: count }, (_, i) => ({ quote: `Definition ${i + 1}`, pageIndex: i, reason: 'Definition' })) });
-  return { storage, native, clock, controller, annotations, items, attachments, plan, creates: () => creates, afterAnnotation: (callback: (() => Promise<void>) | null) => { afterAnnotation = callback; }, setDownloadFails: (value: boolean) => { downloadFails = value; } };
+  return { storage, native, clock, controller, annotations, items, notes, collections, attachments, figureCallouts, plan, creates: () => creates, figureCreates: () => figureCreates, setFigureWriteUncertain: (value: boolean) => { figureWriteUncertain = value; }, afterAnnotation: (callback: (() => Promise<void>) | null) => { afterAnnotation = callback; }, setDownloadFails: (value: boolean) => { downloadFails = value; } };
 }
+async function createTaskPaper(f: ReturnType<typeof fixture>) { return f.native.createItem({ target, key: 'PARENT01', metadata }); }
 it('parses a bounded annotation proposal without accepting model-selected permissions or write fields', () => {
   expect(parseAnnotationCandidates('{"candidates":[{"quote":"A definition","pageIndex":0,"reason":"Definition"}]}')).toEqual([{ quote: 'A definition', pageIndex: 0, reason: 'Definition' }]);
   // A missing comment is not a reason to drop an otherwise resolvable candidate.
   expect(parseAnnotationCandidates('{"candidates":[{"quote":"A definition","pageIndex":0}]}')).toEqual([{ quote: 'A definition', pageIndex: 0, reason: '' }]);
   for (const text of ['```json\n{"candidates":[]}\n```', '{"candidates":[],"approved":true}', '{"candidates":[{"quote":"A definition","pageIndex":0,"reason":"Definition","key":"HOSTILE1"}]}', '{"candidates":[{"quote":"A definition","pageIndex":0,"reason":7}]}']) expect(() => parseAnnotationCandidates(text)).toThrow();
+});
+it('keeps annotation proposal parsing byte-preserving so historical comments remain compatible', () => {
+  const parsed = parseAnnotationCandidates(JSON.stringify({ candidates: [{ quote: 'A definition', pageIndex: 0, reason: 'Explains the controlled comparison. [p. 350](https://zchatgpt.invalid/source/aaaaaaaa-bbbb-8ccc-addd-eeeeeeeeeeee/349) See https://example.org/method.' }] }));
+  expect(parsed[0]?.reason).toBe('Explains the controlled comparison. [p. 350](https://zchatgpt.invalid/source/aaaaaaaa-bbbb-8ccc-addd-eeeeeeeeeeee/349) See https://example.org/method.');
+  expect(validateAnnotationProposal({ quote: 'A definition', pageIndex: 0, reason: 'Legacy [p. 350](https://zchatgpt.invalid/source/aaaaaaaa-bbbb-8ccc-addd-eeeeeeeeeeee/349)' }).reason).toContain('zchatgpt.invalid');
+});
+it('accepts only bounded normalized figure callout boxes and strokes', async () => {
+  expect(parseFigureCalloutProposals(JSON.stringify({ callouts: [{ box: [0.1, 0.2, 0.5, 0.6], strokes: [[[0.1, 0.2], [0.5, 0.6]]], explanation: 'Panel A' }] }))).toEqual([{ box: [0.1, 0.2, 0.5, 0.6], strokes: [[[0.1, 0.2], [0.5, 0.6]]], explanation: 'Panel A' }]);
+  for (const malicious of [
+    { callouts: [{ box: [-0.1, 0.2, 0.5, 0.6], strokes: [[[0.1, 0.2], [0.5, 0.6]]], explanation: 'x' }] },
+    { callouts: [{ box: [0.1, 0.2, 0.5, 0.6], strokes: [[[0.1, 0.2]]], explanation: 'x' }] },
+    { callouts: [{ box: [0.1, 0.2, 0.5, 0.6], strokes: [[[0.1, 0.2], [0.5, 0.6]]], explanation: 'x', key: 'HOSTILE1' }] },
+  ]) expect(() => parseFigureCalloutProposals(JSON.stringify(malicious))).toThrow();
+  const f = fixture();
+  const crop = { ...imageA, origin: { kind: 'paper' as const, paper: paperA, pageIndex: 0, revision } };
+  const selection = { paper: paperA, revision, pageIndex: 0, rect: [100, 100, 500, 500] as [number, number, number, number] };
+  const proposal = { box: [0.1, 0.2, 0.5, 0.6] as [number, number, number, number], strokes: [[[0.1, 0.2], [0.5, 0.6]] as Array<[number, number]>], explanation: 'Marks the first panel.' };
+  const task = await f.controller.planFigureAnnotations({ conversationId: 'conversation-a', question: 'Explain this figure.', modelRequestId: 'figure-request-a', selection, image: crop, proposals: [proposal] });
+  if (task.kind !== 'figure-annotations') throw new Error('The Figure task changed kind.');
+  const replay = await f.controller.planFigureAnnotations({ conversationId: 'conversation-a', question: 'Explain this figure.', modelRequestId: 'figure-request-a', selection, image: crop, proposals: [proposal] });
+  expect(replay.id).toBe(task.id); expect(replay.items[0]?.reservedKey).toBe(task.items[0]?.reservedKey);
+  await expect(f.controller.planFigureAnnotations({ conversationId: 'conversation-a', question: 'Different question.', modelRequestId: 'figure-request-a', selection, image: crop, proposals: [proposal] })).rejects.toMatchObject({ code: 'REQUEST_CONFLICT' });
+  expect(task).toMatchObject({ kind: 'figure-annotations', state: 'review', selection, items: [{ status: 'candidate', proposal }] });
+  const item = task.items[0]!;
+  expect(item.reservedKey).not.toBe(item.inkKey); expect(f.figureCallouts.size).toBe(0);
+  const applied = await f.controller.approve(task.id, [item.id]);
+  expect(applied).toMatchObject({ state: 'completed', items: [{ status: 'applied', callout: { image: { type: 'image' }, ink: { type: 'ink' } } }] });
+  expect(f.figureCreates()).toBe(1); expect(f.figureCallouts.size).toBe(1);
+  expect(await f.controller.undo(task.id)).toMatchObject({ state: 'undone' }); expect(f.figureCallouts.size).toBe(0);
+});
+it('reconciles a committed Figure callout after uncertainty without issuing another native write', async () => {
+  const f = fixture(); f.setFigureWriteUncertain(true);
+  const crop = { ...imageA, origin: { kind: 'paper' as const, paper: paperA, pageIndex: 0, revision } };
+  const task = await f.controller.planFigureAnnotations({ conversationId: 'conversation-a', question: 'Explain this figure.', selection: { paper: paperA, revision, pageIndex: 0, rect: [100, 100, 500, 500] }, image: crop, proposals: [{ box: [0.1, 0.2, 0.5, 0.6] as [number, number, number, number], strokes: [[[0.1, 0.2], [0.5, 0.6]] as Array<[number, number]>], explanation: 'Marks the first panel.' }] });
+  const writing = await f.controller.approve(task.id, [task.items[0]!.id]);
+  expect(writing).toMatchObject({ state: 'uncertain', items: [{ status: 'uncertain' }] });
+  f.setFigureWriteUncertain(false);
+  expect(await f.controller.reconcile(task.id)).toMatchObject({ state: 'completed', items: [{ status: 'applied' }] });
+  expect(f.figureCreates()).toBe(1);
 });
 it('carries a well-formed model annotation answer through parse, planning, approval and undo', async () => {
   const f = fixture();
@@ -96,6 +182,43 @@ it('carries a well-formed model annotation answer through parse, planning, appro
   expect(applied.items.map(item => item.annotation?.comment)).toEqual([`${NATIVE_ANNOTATION_PROVENANCE}\nDefinition of a prior.`, `${NATIVE_ANNOTATION_PROVENANCE}\nDefinition of a likelihood.`]);
   const undone = await f.controller.undo(planned.id);
   expect(undone.state).toBe('undone'); expect(f.annotations.size).toBe(0);
+});
+it('auto-applies only uniquely resolved annotations through the approval ledger and keeps unresolved proposals visible', async () => {
+  const f = fixture();
+  const resolve = f.native.resolveQuote.bind(f.native);
+  f.native.resolveQuote = async input => input.quote === 'Ambiguous passage'
+    ? { status: 'ambiguous', matches: 2 }
+    : resolve(input);
+  const task = await f.controller.planAnnotations({
+    conversationId: 'conversation-a', paper: paperA, revision, question: 'Highlight useful passages.', autoApply: true,
+    candidates: [
+      { quote: 'Definition one', pageIndex: 0, reason: 'Useful definition. [p. 1](https://zchatgpt.invalid/source/aaaaaaaa-bbbb-8ccc-addd-eeeeeeeeeeee/0)' },
+      { quote: 'Ambiguous passage', pageIndex: 1, reason: 'Keep visible' },
+    ],
+  });
+  expect(task.kind).toBe('annotations');
+  if (task.kind !== 'annotations') throw new Error('The annotate task changed kind.');
+  expect(task.autoApply).toBe(true); expect(task.approvedAt).toBeTruthy(); expect(task.state).toBe('partial');
+  expect(task.items[0]).toMatchObject({ status: 'applied', selected: true, annotation: { comment: `${NATIVE_ANNOTATION_PROVENANCE}\nUseful definition.` } });
+  expect(task.items[1]).toMatchObject({ status: 'unresolved', selected: false, resolution: { status: 'ambiguous' } });
+  expect(f.creates()).toBe(1);
+  expect(await f.controller.undo(task.id)).toMatchObject({ state: 'undone' });
+  expect(f.annotations.size).toBe(0);
+});
+it('does not upgrade an existing manual annotation task into automatic writes', async () => {
+  const f = fixture();
+  const input = { conversationId: 'conversation-a', paper: paperA, revision, question: 'Mark the definition.', modelRequestId: 'model-request-a', candidates: [{ quote: 'Definition', pageIndex: 0, reason: 'Useful' }] };
+  const manual = await f.controller.planAnnotations(input);
+  await expect(f.controller.planAnnotations({ ...input, autoApply: true })).rejects.toMatchObject({ code: 'REQUEST_CONFLICT' });
+  expect(await f.controller.get(manual.id)).toEqual(manual);
+  expect(f.creates()).toBe(0);
+});
+it('marks auto-apply annotation tasks failed when no quote is uniquely resolvable and performs no writes', async () => {
+  const f = fixture();
+  f.native.resolveQuote = () => Promise.resolve({ status: 'unresolved', reason: 'not-found' });
+  const task = await f.controller.planAnnotations({ conversationId: 'conversation-a', paper: paperA, revision, question: 'Highlight these.', autoApply: true, candidates: [{ quote: 'Missing quote', pageIndex: 0, reason: 'Explain' }] });
+  expect(task).toMatchObject({ kind: 'annotations', state: 'failed', autoApply: true, items: [{ status: 'unresolved', resolution: { status: 'unresolved', reason: 'not-found' } }] });
+  expect(f.creates()).toBe(0);
 });
 it('persists candidate review and source validation without native writes before approval', async () => {
   const f = fixture(); const task = await f.plan();
@@ -152,6 +275,44 @@ it('undo uses exact saved outputs and preserves a later human annotation edit', 
 it('acquisition review performs metadata lookup and duplicate checks without importing anything', async () => {
   const f = fixture(); const task = await f.controller.planAcquisition({ conversationId: 'conversation-a', target, question: 'Get this paper', identifiers: ['10.1234/example'] });
   expect(task).toMatchObject({ state: 'review', items: [{ preview: { candidates: [metadata] } }] }); expect(f.items.size).toBe(0);
+});
+it('fills only blank allowlisted metadata after review and restores only the exact task delta', async () => {
+  const f = fixture(); const parent = await createTaskPaper(f); const current = f.items.get(parent.key)!;
+  const candidate: NativeMetadata = { ...metadata, abstractNote: 'A concise abstract.', publicationTitle: 'Example Journal' };
+  f.native.previewMetadata = input => Promise.resolve({ identifier: input.identifier, source: 'identifier', candidates: [candidate] });
+  const task = await f.controller.planMetadataUpdate({ conversationId: 'conversation-a', question: 'Fill missing metadata.', selection: [current] });
+  expect(task).toMatchObject({ kind: 'metadata-update', state: 'review', items: [{ fields: { abstractNote: 'A concise abstract.', publicationTitle: 'Example Journal' }, status: 'candidate' }] });
+  expect(f.items.get(parent.key)!.metadata).not.toHaveProperty('abstractNote');
+  const applied = await f.controller.approve(task.id, task.items.map(item => item.id));
+  expect(applied).toMatchObject({ state: 'completed', items: [{ status: 'applied', change: { after: { metadata: { title: metadata.title, abstractNote: 'A concise abstract.', publicationTitle: 'Example Journal' } } } }] });
+  expect(await f.controller.undo(task.id)).toMatchObject({ state: 'undone' });
+  expect(f.items.get(parent.key)!.metadata).toEqual(metadata);
+});
+it('creates a provenance-marked child note and preserves later human edits on undo', async () => {
+  const f = fixture(); const parent = await createTaskPaper(f); const snapshot = f.items.get(parent.key)!;
+  const task = await f.controller.planChildNotes({ conversationId: 'conversation-a', question: 'Summarize this paper.', modelRequestId: 'summary-request-a', proposals: [{ parent: snapshot, body: 'Question: What does it test?\n\nFinding: A synthetic result.' }] });
+  expect(task).toMatchObject({ kind: 'child-notes', state: 'review', items: [{ status: 'candidate' }] });
+  const applied = await f.controller.approve(task.id, task.items.map(item => item.id));
+  expect(applied.state).toBe('completed');
+  const appliedNote = applied.kind === 'child-notes' ? applied.items[0]?.note : undefined;
+  expect(appliedNote?.parentKey).toBe(parent.key); expect(appliedNote?.body).toContain('data-zchatgpt-provenance="zotero-chatgpt"');
+  const saved = f.notes.get(task.items[0]!.reservedKey)!; saved.body = '<p>Human edited note</p>';
+  expect(await f.controller.undo(task.id)).toMatchObject({ state: 'conflict' });
+  expect(f.notes.get(task.items[0]!.reservedKey)?.body).toBe('<p>Human edited note</p>');
+});
+it('creates a named child collection under the explicit parent and trashes it on exact undo', async () => {
+  const f = fixture(); const createTarget = { clientId: target.clientId, libraryId: target.libraryId, parentCollectionKey: target.collectionKey };
+  const task = await f.controller.planCollectionCreate({ conversationId: 'conversation-a', question: 'Create a collection.', target: createTarget, name: 'Predictive Coding' });
+  expect(task).toMatchObject({ kind: 'collection-create', state: 'review', items: [{ target: createTarget, name: 'Predictive Coding', status: 'candidate' }] });
+  const applied = await f.controller.approve(task.id, task.items.map(item => item.id));
+  expect(applied).toMatchObject({ state: 'completed', items: [{ status: 'applied', collection: { name: 'Predictive Coding', parentKey: 'COLLECT1', childItemKeys: [], childCollectionKeys: [] } }] });
+  expect(await f.controller.undo(task.id)).toMatchObject({ state: 'undone' }); expect(f.collections.size).toBe(0);
+});
+it('preserves a created collection if a user adds an item before undo', async () => {
+  const f = fixture(); const task = await f.controller.planCollectionCreate({ conversationId: 'conversation-a', question: 'Create a collection.', target: { clientId: target.clientId, libraryId: target.libraryId, parentCollectionKey: null }, name: 'Methods' });
+  const applied = await f.controller.approve(task.id, task.items.map(item => item.id)); if (applied.kind !== 'collection-create') throw new Error('Expected a collection task');
+  f.collections.get(applied.items[0]!.reservedKey)!.childItemKeys.push('CHILD000');
+  expect(await f.controller.undo(task.id)).toMatchObject({ state: 'conflict' }); expect(f.collections.size).toBe(1);
 });
 it('a failed PDF download retains correct metadata and reports partial completion', async () => {
   const f = fixture(); const task = await f.controller.planAcquisition({ conversationId: 'conversation-a', target, question: 'Get this paper', identifiers: ['10.1234/example'] });

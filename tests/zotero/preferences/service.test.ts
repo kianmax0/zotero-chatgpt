@@ -9,7 +9,7 @@ const copy = <T>(value: T): T => structuredClone(value);
 
 const userSkill: ReaderSkill = { id: 'user-study', name: 'Study', description: 'Study the supplied source', version: '1.0', revision: 'revision-one', markdown: '# Study\nPreserve notation.', origin: 'user', enabled: true, workflow: 'read', permissions: [], unsupportedDependencies: [] };
 
-function fixture(overrides: Partial<ReaderWorkspace> = {}, liveModels?: () => Promise<string[] | null>) {
+function fixture(overrides: Partial<ReaderWorkspace> = {}, liveModels?: () => Promise<string[] | null>, settingsChanged?: (settings: WorkspaceSettings) => void) {
   let settings: WorkspaceSettings = { ...defaultSettings(), skills: [...defaultSettings().skills, copy(userSkill)], profiles: [{ id: 'formal', name: 'Formal', preferences: { mathematics: 'formal' } }] };
   const workspace: ReaderWorkspace = {
     settings: vi.fn(() => Promise.resolve(copy(settings))),
@@ -25,6 +25,7 @@ function fixture(overrides: Partial<ReaderWorkspace> = {}, liveModels?: () => Pr
     readAutomaticPdfText: () => automaticPdfText,
     writeAutomaticPdfText: enabled => { automaticPdfText = enabled; },
     ...(liveModels ? { liveModels } : {}),
+    ...(settingsChanged ? { settingsChanged } : {}),
   });
   return { service, workspace, current: () => copy(settings), automaticPdfText: () => automaticPdfText };
 }
@@ -66,7 +67,7 @@ it('reads the real stored settings as JSON without inventing fields', async () =
   expect(parsed).toEqual(current());
   expect(Object.keys(parsed).sort()).toEqual(['allowedModels', 'preferences', 'profiles', 'schemaVersion', 'skills', 'textScale', 'uiLanguage']);
   // The allowlist crosses the JSON bridge intact so the pane can render the stored selection.
-  expect(parsed.allowedModels?.map(model => model.id)).toEqual(['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna']);
+  expect(parsed.allowedModels?.map(model => model.id)).toEqual(['gpt-6-sol', 'gpt-6-astra', 'gpt-6-luna']);
 });
 
 it('writes a full validated snapshot through saveSettings, including skill activation', async () => {
@@ -74,6 +75,22 @@ it('writes a full validated snapshot through saveSettings, including skill activ
   const next = { ...JSON.parse(await service.readSettings()) as WorkspaceSettings, uiLanguage: 'zh' as const, textScale: 1.5 };
   await service.writeSettings(JSON.stringify(next));
   expect(workspace.saveSettings).toHaveBeenCalledWith(next);
+});
+
+it('notifies live views only after the full settings snapshot has been saved', async () => {
+  const order: string[] = [];
+  let saved: WorkspaceSettings | null = null;
+  const notified: WorkspaceSettings[] = [];
+  const onSettingsChanged = vi.fn((settings: WorkspaceSettings) => { order.push('notify'); notified.push(copy(settings)); });
+  const { service, workspace } = fixture({
+    saveSettings: vi.fn<ReaderWorkspace['saveSettings']>(value => { order.push('save'); saved = copy(value); return Promise.resolve(); }),
+  }, undefined, onSettingsChanged);
+  const next = { ...JSON.parse(await service.readSettings()) as WorkspaceSettings, allowedModels: [{ id: 'gpt-6-luna', name: 'GPT-6 Luna' }] };
+  await service.writeSettings(JSON.stringify(next));
+  expect(workspace.saveSettings).toHaveBeenCalledWith(next);
+  expect(saved).toEqual(next);
+  expect(notified).toEqual([next]);
+  expect(order).toEqual(['save', 'notify']);
 });
 
 it('refuses malformed or non-object payloads with a clean error instead of touching the store', async () => {
@@ -87,9 +104,11 @@ it('refuses malformed or non-object payloads with a clean error instead of touch
 
 it('propagates store failures so the pane can report them honestly', async () => {
   const failure = new ReaderError('REQUEST_CONFLICT', 'This workflow has changed since it was opened.');
-  const { service } = fixture({ saveSettings: vi.fn<ReaderWorkspace['saveSettings']>().mockRejectedValue(failure) });
+  const onSettingsChanged = vi.fn();
+  const { service } = fixture({ saveSettings: vi.fn<ReaderWorkspace['saveSettings']>().mockRejectedValue(failure) }, undefined, onSettingsChanged);
   const snapshot = await service.readSettings();
   await expect(service.writeSettings(snapshot)).rejects.toBe(failure);
+  expect(onSettingsChanged).not.toHaveBeenCalled();
 });
 
 it('toggles exactly one installed workflow through saveSkill and preserves its revision', async () => {

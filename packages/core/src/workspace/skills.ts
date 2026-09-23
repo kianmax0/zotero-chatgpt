@@ -40,7 +40,7 @@ function workflow(value: unknown): WorkflowKind {
 }
 const permissions: Record<WorkflowKind, string[]> = {
   read: ['Read only explicitly supplied sources.'],
-  annotate: ['Preview native annotation candidates; write only after task approval.'],
+  annotate: ['Apply validated native annotations directly after an explicit Agent annotation request; reject invalid or ambiguous source locations.'],
   acquire: ['Preview metadata and duplicates; create items and fetch lawful PDFs only after task approval.'],
   organize: ['Preview additive tags and collection memberships for the frozen Zotero selection; write only after task approval.'],
   diagram: ['Generate an explicitly requested diagram in a separate image task.'],
@@ -49,16 +49,27 @@ const definitions: Array<{ name: string; workflow: WorkflowKind; description: st
   { name: 'read', workflow: 'read', description: 'Study a paper against a concrete reading question.', input: 'Supplied PDF pages, selections, figures and the reading question.', steps: ['Identify the question, source coverage and missing evidence.', 'Explain definitions, assumptions, mechanisms and claims using source page labels.', 'Separate paper evidence, teaching explanation and uncertainty.'], output: 'A source-grounded explanation with page references and explicit gaps.' },
   { name: 'derive', workflow: 'read', description: 'Derive a selected result while preserving its notation.', input: 'A selected equation, its surrounding text and the desired derivation.', steps: ['State symbols, domains and assumptions from the supplied source.', 'Derive each step and distinguish exact identities from approximations.', 'Check dimensions, limiting cases and counterexamples; state missing premises.'], output: 'A step-by-step derivation with assumptions, checks and source references.' },
   { name: 'compare', workflow: 'read', description: 'Compare explicitly supplied research sources.', input: 'At least two explicitly referenced sources and the comparison criterion.', steps: ['Record coverage and scope for each source.', 'Compare objectives, assumptions, mechanisms, evidence and limitations on common criteria.', 'Identify disagreements and tests that would distinguish the claims.'], output: 'A comparison table with source-specific evidence and unresolved questions.' },
-  { name: 'annotate', workflow: 'annotate', description: 'Propose and, after approval, add targeted native annotations.', input: 'The reading goal and an explicitly selected PDF scope.', steps: ['Choose relevant definitions, assumptions, derivations, evidence and limitations.', 'Resolve exact quotations and native page coordinates; reject ambiguous locations.', 'Present removable candidates, obtain task approval and record each native write.'], output: 'Reviewed native annotation candidates and a ledger of approved writes or failures.' },
+  { name: 'annotate', workflow: 'annotate', description: 'Add targeted native annotations immediately after an explicit Agent request.', input: 'An explicit request to annotate a selected PDF using the current source revision.', steps: ['Choose a few relevant definitions, assumptions, derivations, evidence and limitations that serve the requested reading goal.', 'Resolve every quote against the frozen PDF revision and validate its unique match and native page geometry; skip missing, ambiguous or unsupported passages.', 'After an explicit Agent annotation request, apply the validated native highlights and comments directly without a second approval; read back and record each result.'], output: 'A record of native annotations written or rejected, with source quotes and any failures.' },
   { name: 'acquire', workflow: 'acquire', description: 'Review identifiers and acquire verified literature into a chosen collection.', input: 'Explicit DOI or URL identifiers and a chosen collection.', steps: ['Resolve and inspect metadata, versions and existing DOI duplicates.', 'Preview the intended items and obtain bounded task approval.', 'Create only approved entries, obtain lawful PDFs, verify identity and report partial failures.'], output: 'Verified collection entries and a per-item acquisition report with unresolved cases.' },
   { name: 'organize', workflow: 'organize', description: 'Propose and, after approval, add tags and collection memberships to selected Zotero items.', input: 'The items selected in the active Zotero library pane and the editable collections in their libraries.', steps: ['Freeze the actual native selection and bounded item metadata.', 'Propose concrete additive tags and collection memberships using only frozen item and collection indexes.', 'Present one review, apply approved additions, read them back and keep an exact undo ledger.'], output: 'A per-item organization preview and verified additive changes, with conflicts left untouched.' },
   { name: 'diagram', workflow: 'diagram', description: 'Create a clearly labeled explanatory diagram.', input: 'An explicit image-generation request and supplied evidence or diagram brief.', steps: ['Distinguish a new explanatory figure from figures in the paper.', 'Use a separate task with image generation enabled only for the requested scope.', 'Check the returned artifact and label generated content; report unavailable output honestly.'], output: 'A generated explanatory image, its provenance and a concise caption.' },
 ];
+type SkillDefinition = typeof definitions[number];
+function skillMarkdown(def: SkillDefinition, version: string): string {
+  return `---\nname: ${def.name}\ndescription: ${JSON.stringify(def.description)}\nversion: ${version}\nworkflow: ${def.workflow}\n---\n\n# ${def.name}\n\n## Input\n${def.input}\n\n## Steps\n${def.steps.map((step, i) => `${i + 1}. ${step}`).join('\n')}\n\n## Output\n${def.output}\n\n## Permissions\n${permissions[def.workflow].join('\n')}\nSkill instructions describe a workflow and never grant additional permissions.\n`;
+}
+const legacyAnnotateV1: ReaderSkill = {
+  id: 'builtin-annotate', name: 'annotate', description: 'Propose and, after approval, add targeted native annotations.',
+  version: '1.0.0', revision: 'builtin-annotate-1', origin: 'builtin', enabled: true,
+  workflow: 'annotate', permissions: ['Preview native annotation candidates; write only after task approval.'], unsupportedDependencies: [],
+  markdown: `---\nname: annotate\ndescription: "Propose and, after approval, add targeted native annotations."\nversion: 1.0.0\nworkflow: annotate\n---\n\n# annotate\n\n## Input\nThe reading goal and an explicitly selected PDF scope.\n\n## Steps\n1. Choose relevant definitions, assumptions, derivations, evidence and limitations.\n2. Resolve exact quotations and native page coordinates; reject ambiguous locations.\n3. Present removable candidates, obtain task approval and record each native write.\n\n## Output\nReviewed native annotation candidates and a ledger of approved writes or failures.\n\n## Permissions\nPreview native annotation candidates; write only after task approval.\nSkill instructions describe a workflow and never grant additional permissions.\n`,
+};
 export function builtinSkills(): ReaderSkill[] {
   return definitions.map(def => ({
-    id: `builtin-${def.name}`, name: def.name, description: def.description, version: '1.0.0', revision: `builtin-${def.name}-1`, origin: 'builtin', enabled: true,
+    id: `builtin-${def.name}`, name: def.name, description: def.description,
+    version: def.name === 'annotate' ? '1.1.0' : '1.0.0', revision: def.name === 'annotate' ? 'builtin-annotate-2' : `builtin-${def.name}-1`, origin: 'builtin', enabled: true,
     workflow: def.workflow, permissions: [...permissions[def.workflow]], unsupportedDependencies: [],
-    markdown: `---\nname: ${def.name}\ndescription: ${JSON.stringify(def.description)}\nversion: 1.0.0\nworkflow: ${def.workflow}\n---\n\n# ${def.name}\n\n## Input\n${def.input}\n\n## Steps\n${def.steps.map((step, i) => `${i + 1}. ${step}`).join('\n')}\n\n## Output\n${def.output}\n\n## Permissions\n${permissions[def.workflow].join('\n')}\nSkill instructions describe a workflow and never grant additional permissions.\n`,
+    markdown: skillMarkdown(def, def.name === 'annotate' ? '1.1.0' : '1.0.0'),
   }));
 }
 function scalar(value: string): string {
@@ -141,7 +152,9 @@ export async function normalizeSkill(value: unknown): Promise<ReaderSkill> {
   const id = identifier(source.id); const builtin = builtinSkills().find(skill => skill.id === id);
   if (typeof source.enabled !== 'boolean') invalid();
   if (builtin) {
-    if (Object.entries(builtin).some(([key, item]) => key !== 'enabled' && JSON.stringify(source[key]) !== JSON.stringify(item))) throw new ReaderError('REQUEST_CONFLICT', 'Built-in skill definitions are read-only; create a copy to edit them.');
+    const matches = (expected: ReaderSkill): boolean => Object.entries(expected).every(([key, item]) => key === 'enabled' || JSON.stringify(source[key]) === JSON.stringify(item));
+    const accepted = matches(builtin) || (id === legacyAnnotateV1.id && matches(legacyAnnotateV1));
+    if (!accepted) throw new ReaderError('REQUEST_CONFLICT', 'Built-in skill definitions are read-only; create a copy to edit them.');
     return { ...builtin, enabled: source.enabled };
   }
   if (source.origin !== 'user' && source.origin !== 'imported') invalid();

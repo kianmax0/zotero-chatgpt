@@ -13,6 +13,14 @@ it('validates and freezes workflow and explicitly referenced article snapshots',
   workflow.preferences.language = 'en'; ref.document.pages[0] = { ...ref.document.pages[0]!, text: 'Changed' };
   expect(checked.workflow?.preferences.language).toBe('zh'); expect(checked.references?.[0]?.document?.pages[0]?.text).toContain('Definition');
 });
+it('persists automatic annotation intent only for an explicit annotate workflow', () => {
+  const annotate = { ...workflow.skill, workflow: 'annotate' as const };
+  const approved = validateSendInput(makeSend({ mode: 'agent', workflow: { ...workflow, skill: annotate, autoApplyAnnotations: true } }));
+  expect(approved.workflow?.autoApplyAnnotations).toBe(true);
+  expect(() => validateSendInput(makeSend({ mode: 'chat', workflow: { ...workflow, skill: annotate, autoApplyAnnotations: true } }))).toThrow();
+  expect(() => validateSendInput(makeSend({ workflow: { ...workflow, autoApplyAnnotations: true } }))).toThrow();
+  expect(() => validateSendInput(makeSend({ workflow: { ...workflow, skill: annotate, autoApplyAnnotations: false as never } }))).toThrow();
+});
 it('does not count referenced document text as control metadata or silently truncate it', () => {
   const ref = { id: 'article-b', kind: 'article' as const, label: 'B', paper: paperB, capturedAt: '2026-09-12T10:00:00.000Z', document: { ...documentA, paper: paperB, pages: [{ ...documentA.pages[0]!, text: 'x'.repeat(300000) }] } };
   expect(validateSendInput(makeSend({ references: [ref] })).references?.[0]?.document?.pages[0]?.text).toHaveLength(300000);

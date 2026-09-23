@@ -1,17 +1,17 @@
 /** Source-controlled release identity; build never substitutes the locally installed CLI. */
 export const PINNED_RUNTIME = {
-  codexVersion: '0.154.0',
+  codexVersion: '0.156.1',
   platform: 'darwin',
   architecture: 'arm64',
   entry: 'content/runtime/codex-aarch64-apple-darwin',
-  size: 222655232,
-  sha256: '4f85982624b3898c8991cb80c0981b2aa71070e3537046c9a95950318a95afcc',
+  size: 238138912,
+  sha256: '0196e89fe5a7598f816ee54232c3d7c26d75e502ab5cfe2c9240e81d90f7255a',
   archive: {
-    url: 'https://github.com/openai/codex/releases/download/rust-v0.154.0/codex-aarch64-apple-darwin.tar.gz',
+    url: 'https://github.com/openai/codex/releases/download/rust-v0.156.1/codex-aarch64-apple-darwin.tar.gz',
     filename: 'codex-aarch64-apple-darwin.tar.gz',
     entry: 'codex-aarch64-apple-darwin',
-    size: 88080735,
-    sha256: '344310a0a591c1b192e04feff304321a69907c9498baaac331ca7e16ebcef9d7',
+    size: 94626816,
+    sha256: '2bd64af14dedd47795f2f6bfd5d125cf79199acc2c7ba222144e08127111a5ca',
   },
   licenses: ['LICENSE', 'NOTICE', 'RATATUI-LICENSE', 'WEZTERM-LICENSE'],
 } as const;

@@ -69,7 +69,7 @@ export function validateReferenceInput(value: unknown): ReferenceInput {
   return result;
 }
 export function validateWorkflow(value: unknown): WorkflowSnapshot {
-  const source = object(value, ['skill', 'preferences', 'profileId']);
+  const source = object(value, ['skill', 'preferences', 'profileId', 'autoApplyAnnotations']);
   const prefs = validatePreferences(source.preferences); if (preferenceKeys.some(key => prefs[key] === undefined)) fail();
   let skill: ReaderSkill | null = null;
   if (source.skill !== null) {
@@ -78,7 +78,8 @@ export function validateWorkflow(value: unknown): WorkflowSnapshot {
     const unsupported = array(s.unsupportedDependencies, 64).map(x => text(x, 256)); if (unsupported.length) throw new ReaderError('UNSUPPORTED_INTERACTION', 'This workflow has unsupported dependencies; they were not executed.');
     skill = { id: text(s.id, 128, 1), name: text(s.name, 128, 1), description: text(s.description, 2048), version: text(s.version, 64, 1), revision: text(s.revision, 128, 1), markdown: text(s.markdown, 64 * 1024, 1), origin: s.origin as ReaderSkill['origin'], enabled: true, workflow: s.workflow as ReaderSkill['workflow'], permissions: array(s.permissions, 64).map(x => text(x, 256)), unsupportedDependencies: [] };
   }
-  return { skill, preferences: prefs as Personalization, profileId: source.profileId === null ? null : text(source.profileId, 128, 1) };
+  if (source.autoApplyAnnotations !== undefined && (source.autoApplyAnnotations !== true || skill?.workflow !== 'annotate')) fail();
+  return { skill, preferences: prefs as Personalization, profileId: source.profileId === null ? null : text(source.profileId, 128, 1), ...(source.autoApplyAnnotations ? { autoApplyAnnotations: true as const } : {}) };
 }
 export function validateBatch(value: unknown): ContextBatch {
   const source = object(value, ['id', 'index', 'total', 'phase', 'question', 'summaries']);

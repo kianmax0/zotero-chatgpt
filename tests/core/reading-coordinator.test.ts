@@ -340,7 +340,7 @@ it('does not report cancelled until a held batch is safely released', async () =
 
 it('releases a paused two-pass core batch on cancellation and starts the ordinary core queue', async () => {
   const f = fixture(20000); const server = appServer();
-  const client = await createReaderClient(server.p, f.storage, { codexVersion: '0.154.0', cwd: '/isolated', uuid: f.clock.uuid, now: f.clock.now, pluginVersion: '0.4.0-batch-regression' });
+  const client = await createReaderClient(server.p, f.storage, { codexVersion: '0.156.1', cwd: '/isolated', uuid: f.clock.uuid, now: f.clock.now, pluginVersion: '0.4.0-batch-regression' });
   const coordinator = new ReadingCoordinator(client, f.storage, f.clock);
   const selected = { model: catalogModel.model, effort: catalogModel.defaultReasoningEffort, serviceTier: 'priority' };
   try {

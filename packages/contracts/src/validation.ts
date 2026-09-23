@@ -207,6 +207,7 @@ export function validateSendInput(value: unknown): SendInput {
   if (input.paper !== undefined) result.paper = validatePaperIdentity(input.paper);
   if (input.document !== undefined) result.document = validateDocument(input.document);
   if (input.workflow !== undefined) result.workflow = validateWorkflow(input.workflow);
+  if (result.workflow?.autoApplyAnnotations && result.mode !== 'agent') invalid('automatic annotations require an explicit Agent request');
   if (input.batch !== undefined) result.batch = validateBatch(input.batch);
   if (input.contextReport !== undefined) result.contextReport = validateContextReport(input.contextReport);
   if (input.organization !== undefined) result.organization = validateOrganizationContext(input.organization);

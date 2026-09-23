@@ -5,7 +5,7 @@ import { expect, it, vi } from 'vitest';
 import { ReaderError } from '../../../packages/contracts/src/index.ts';
 import type { ReaderSkill, WorkspaceSettings } from '../../../packages/contracts/src/workspace.ts';
 import { defaultSettings } from '../../../packages/core/src/workspace/skills.ts';
-import { defaultAllowedModels } from '../../../packages/core/src/workspace/allowed-models.ts';
+import { defaultAllowedModels, LEGACY_DEFAULT_ALLOWED_MODEL_IDS, modelLabel } from '../../../packages/core/src/workspace/allowed-models.ts';
 import { createPreferencesPane, type PreferencesPaneHost } from '../../../packages/zotero/src/preferences/pane.ts';
 
 const copy = <T>(value: T): T => structuredClone(value);
@@ -172,7 +172,7 @@ it('owns the automatic-PDF-text opt-out in the native pane without writing the w
   await ready;
   const toggle = find<HTMLInputElement>('[data-zchatgpt-pref="automatic-pdf-text"]');
   expect(toggle.checked).toBe(true);
-  expect(toggle.closest('label')?.textContent).toMatch(/Use current PDF text automatically/u);
+  expect(toggle.closest('label')?.textContent).toMatch(/Use current paper context automatically/u);
   // The checkbox writes the same pref the reader re-checks at every request boundary.
   toggle.checked = false; change(toggle);
   expect(writeAutomaticPdfText).toHaveBeenCalledWith(false);
@@ -237,13 +237,13 @@ it('toggles one workflow through setSkillEnabled and reverts the checkbox when t
   expect(toggle.disabled).toBe(false);
 });
 
-it('renders only the offerable model families as labelled checkbox rows with exact ids', async () => {
+it('renders all three pinned current models without a live model report', async () => {
   const { host } = fixture();
   const { ready, root, find } = mount(host);
   await ready;
   const rows = [...find('[data-zchatgpt-pref="models"]').querySelectorAll<HTMLElement>('.zchatgpt-preferences-model')];
-  expect(rows.map(row => row.dataset.zchatgptModel)).toEqual(['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna']);
-  expect(rows).toHaveLength(4);
+  expect(rows.map(row => row.dataset.zchatgptModel)).toEqual(['gpt-6-sol', 'gpt-6-astra', 'gpt-6-luna']);
+  expect(rows).toHaveLength(3);
   const astra = find<HTMLInputElement>('[data-zchatgpt-model-allowed="gpt-6-astra"]');
   expect(astra.checked).toBe(true);
   expect(astra.disabled).toBe(false);
@@ -259,9 +259,9 @@ it('renders only the offerable model families as labelled checkbox rows with exa
   for (const excluded of ['gpt-daybreak-blue-latest', 'gpt-5.5', 'gpt-5.4', 'gpt-5.2', 'codex-auto-review']) {
     expect(root.querySelector(`[data-zchatgpt-model="${excluded}"]`), excluded).toBeNull();
   }
-  // The default allowlist is exactly GPT-6-Astra plus the GPT-5.6 family; everything else is off.
+  // The pinned catalog supplies all current models, independent of account live-list availability.
   expect([...root.querySelectorAll<HTMLInputElement>('[data-zchatgpt-model-allowed]')].filter(input => input.checked).map(input => input.dataset.zchatgptModelAllowed))
-    .toEqual(['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna']);
+    .toEqual(['gpt-6-sol', 'gpt-6-astra', 'gpt-6-luna']);
   // The pane states its candidate-list source honestly rather than implying live entitlements, and
   // says the two things only the rows cannot: checking is what offers a model, and the id is sent.
   const note = find('[data-zchatgpt-pref="models-note"]').textContent ?? '';
@@ -271,96 +271,105 @@ it('renders only the offerable model families as labelled checkbox rows with exa
 });
 
 it('saves a changed allowlist through the workspace snapshot and refuses to empty it', async () => {
-  const { host, save, current } = fixture();
+  const { host, save, current } = fixture(undefined, { readLiveModels: () => Promise.resolve(['gpt-6-sol', 'gpt-6-luna']) });
   const { ready, find, change, settle } = mount(host);
   await ready;
   const toggle = (id: string, checked: boolean) => { const input = find<HTMLInputElement>(`[data-zchatgpt-model-allowed="${id}"]`); input.checked = checked; change(input); };
-  toggle('gpt-5.6-luna', false);
-  await vi.waitFor(() => expect(current().allowedModels?.map(model => model.id)).toEqual(['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra']));
+  toggle('gpt-6-luna', false);
+  await vi.waitFor(() => expect(current().allowedModels?.map(model => model.id)).toEqual(['gpt-6-sol', 'gpt-6-astra']));
   await settle();
   expect(find<HTMLElement>('[data-zchatgpt-pref="status"]').textContent).toMatch(/saved/iu);
-  toggle('gpt-5.6-terra', false); await settle();
-  toggle('gpt-5.6-sol', false); await settle();
-  expect(current().allowedModels?.map(model => model.id)).toEqual(['gpt-6-astra']);
-
+  toggle('gpt-6-astra', false); await settle();
+  expect(current().allowedModels?.map(model => model.id)).toEqual(['gpt-6-sol']);
   // Unchecking the last model is refused locally with an honest message and restores the selection:
   // no write is attempted, so the picker can never be emptied.
   const writes = save.mock.calls.length;
-  toggle('gpt-6-astra', false);
+  toggle('gpt-6-sol', false);
   await vi.waitFor(() => expect(find<HTMLElement>('[data-zchatgpt-pref="error"]').hidden).toBe(false));
   await settle();
   expect(find<HTMLElement>('[data-zchatgpt-pref="error"]').textContent).toBe('At least one model must stay available. The previous selection was kept.');
   expect(save.mock.calls.length).toBe(writes);
-  expect(current().allowedModels?.map(model => model.id)).toEqual(['gpt-6-astra']);
-  expect(find<HTMLInputElement>('[data-zchatgpt-model-allowed="gpt-6-astra"]').checked).toBe(true);
+  expect(current().allowedModels?.map(model => model.id)).toEqual(['gpt-6-sol']);
+  expect(find<HTMLInputElement>('[data-zchatgpt-model-allowed="gpt-6-sol"]').checked).toBe(true);
   expect(find<HTMLElement>('[data-zchatgpt-pref="status"]').hidden).toBe(true);
 });
 
-it('offers a runtime-reported GPT-5.3 Spark model and persists the owner\'s choice', async () => {
-  // The runtime reports the Spark family plus models the pane must not offer; only the Spark id joins.
-  const live = ['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.3-codex-spark', 'gpt-5.5', 'codex-auto-review'];
+it('offers runtime-reported GPT-6 Sol and Luna and persists the owner\'s choice', async () => {
+  const live = ['gpt-6-astra', 'gpt-6-sol', 'gpt-6-luna', 'gpt-6-terra', 'gpt-5.5', 'codex-auto-review'];
   const { host, current } = fixture(undefined, { readLiveModels: () => Promise.resolve(live) });
   const { ready, root, find, change, settle } = mount(host);
   await ready;
-  const spark = find<HTMLInputElement>('[data-zchatgpt-model-allowed="gpt-5.3-codex-spark"]');
-  expect(spark.checked).toBe(false);
-  expect(root.querySelector('[data-zchatgpt-model="gpt-5.3-codex-spark"] .zchatgpt-preferences-muted')?.textContent).toBe('gpt-5.3-codex-spark');
+  const luna = find<HTMLInputElement>('[data-zchatgpt-model-allowed="gpt-6-luna"]');
+  expect(luna.checked).toBe(true);
+  expect(root.querySelector('[data-zchatgpt-model="gpt-6-luna"] .zchatgpt-preferences-muted')?.textContent).toBe('gpt-6-luna');
   expect(root.querySelector('[data-zchatgpt-model="gpt-5.5"]')).toBeNull();
   expect(root.querySelector('[data-zchatgpt-model="codex-auto-review"]')).toBeNull();
-  spark.checked = true; change(spark);
+  luna.checked = false; change(luna);
   await settle();
-  expect(current().allowedModels?.map(model => model.id)).toEqual(['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.3-codex-spark']);
+  expect(current().allowedModels?.map(model => model.id)).toEqual(['gpt-6-sol', 'gpt-6-astra']);
 });
 
-it('keeps a saved Spark selection visible and checked without a live list', async () => {
-  const settings = { ...defaultSettings(), allowedModels: [...defaultAllowedModels(), { id: 'gpt-5.3-codex-spark', name: 'GPT-5.3 Codex Spark' }] };
-  const { host } = fixture(settings);
-  const { ready, root, find } = mount(host);
+it('preserves a historical stored model across a save without offering it', async () => {
+  const settings = { ...defaultSettings(), allowedModels: [...defaultAllowedModels(), { id: 'gpt-5.6-sol', name: 'Saved GPT-5.6 Sol' }] };
+  const { host, current } = fixture(settings, { readLiveModels: () => Promise.resolve(['gpt-6-sol']) });
+  const { ready, root, find, change, settle } = mount(host);
   await ready;
-  const spark = find<HTMLInputElement>('[data-zchatgpt-model-allowed="gpt-5.3-codex-spark"]');
-  expect(spark.checked).toBe(true);
-  // The exact id the owner saved stays on screen even though no live list reported it this time.
-  expect(root.querySelector('[data-zchatgpt-model="gpt-5.3-codex-spark"] .zchatgpt-preferences-muted')?.textContent).toBe('gpt-5.3-codex-spark');
+  expect(root.querySelector('[data-zchatgpt-model="gpt-5.6-sol"]')).toBeNull();
+  const sol = find<HTMLInputElement>('[data-zchatgpt-model-allowed="gpt-6-sol"]');
+  sol.checked = false; change(sol); await settle();
+  expect(current().allowedModels?.map(model => model.id)).toContain('gpt-5.6-sol');
+  expect(current().allowedModels?.find(model => model.id === 'gpt-5.6-sol')?.name).toBe('Saved GPT-5.6 Sol');
+});
+
+it('shows current models selected for the exact legacy default without rewriting its stored IDs', async () => {
+  const settings = { ...defaultSettings(), allowedModels: LEGACY_DEFAULT_ALLOWED_MODEL_IDS.map(id => ({ id, name: modelLabel(id) })) };
+  const { host, current } = fixture(settings, { readLiveModels: () => Promise.resolve(['gpt-6-sol', 'gpt-6-luna']) });
+  const { ready, find } = mount(host);
+  await ready;
+  expect(find<HTMLInputElement>('[data-zchatgpt-model-allowed="gpt-6-sol"]').checked).toBe(true);
+  expect(find<HTMLInputElement>('[data-zchatgpt-model-allowed="gpt-6-astra"]').checked).toBe(true);
+  expect(find<HTMLInputElement>('[data-zchatgpt-model-allowed="gpt-6-luna"]').checked).toBe(true);
+  expect(current().allowedModels?.map(model => model.id)).toEqual([...LEGACY_DEFAULT_ALLOWED_MODEL_IDS]);
 });
 
 it('never offers an excluded model from a stale allowlist, and never silently drops the stored id', async () => {
   const settings = { ...defaultSettings(), allowedModels: [{ id: 'gpt-6-astra', name: 'GPT-6 Astra' }, { id: 'gpt-5.5', name: 'GPT-5.5' }] };
-  const { host, current } = fixture(settings);
+  const { host, current } = fixture(settings, { readLiveModels: () => Promise.resolve(['gpt-6-sol']) });
   const { ready, root, find, change, settle } = mount(host);
   await ready;
   // The excluded family gets no row, so it can never be checked, offered or re-selected here.
   expect(root.querySelector('[data-zchatgpt-model="gpt-5.5"]')).toBeNull();
   expect(find<HTMLInputElement>('[data-zchatgpt-model-allowed="gpt-6-astra"]').checked).toBe(true);
-  const sol = find<HTMLInputElement>('[data-zchatgpt-model-allowed="gpt-5.6-sol"]');
+  const sol = find<HTMLInputElement>('[data-zchatgpt-model-allowed="gpt-6-sol"]');
   sol.checked = true; change(sol);
   await settle();
   // The offerable selection is saved. The stored id the pane can no longer offer stays in the record
   // instead of being silently dropped, and it is still not a row.
-  expect(current().allowedModels?.map(model => model.id)).toEqual(['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.5']);
+  expect(current().allowedModels?.map(model => model.id)).toEqual(['gpt-6-sol', 'gpt-6-astra', 'gpt-5.5']);
   expect(root.querySelector('[data-zchatgpt-model="gpt-5.5"]')).toBeNull();
 });
 
-it('tells the truth about where the Spark models come from when no live list exists', async () => {
-  // No host method at all: the bundled catalog is all the pane knows, and it says so.
+it('explains that the bundled catalog is not an account entitlement list', async () => {
+  // No host method at all: the bundled catalog supplies current candidates, without asserting account access.
   const absent = fixture();
   const first = mount(absent.host);
   await first.ready;
   const note = first.find('[data-zchatgpt-pref="models-note"]').textContent ?? '';
   expect(note).toMatch(/bundled catalog, not your account/u);
-  expect(note).toMatch(/GPT-5\.3-Spark the running runtime reports/u);
+  expect(note).not.toMatch(/only when the running runtime reports/u);
   expect(note).toMatch(/exact id is what is sent/u);
   expect(first.root.querySelector('[data-zchatgpt-model^="gpt-5.3"]')).toBeNull();
 
-  // The host has the port but no running runtime: the same honest copy, never an invented row.
+  // The host has the port but no running runtime: the pinned candidates still appear.
   const reported = fixture(undefined, { readLiveModels: () => Promise.resolve(null) });
   const second = mount(reported.host);
   await second.ready;
   expect(second.find('[data-zchatgpt-pref="models-note"]').textContent).toBe(note);
-  expect(second.root.querySelector('[data-zchatgpt-model^="gpt-5.3"]')).toBeNull();
+  expect(second.root.querySelector('[data-zchatgpt-model="gpt-6-luna"]')).not.toBeNull();
 });
 
-it('explains the live list when the running runtime reports models', async () => {
-  const { host } = fixture(undefined, { readLiveModels: () => Promise.resolve(['gpt-6-astra', 'gpt-5.3-codex-spark']) });
+it('explains the live list when the running runtime reports current models', async () => {
+  const { host } = fixture(undefined, { readLiveModels: () => Promise.resolve(['gpt-6-astra', 'gpt-6-sol', 'gpt-5.3-codex-spark']) });
   const { ready, find } = mount(host);
   await ready;
   const note = find('[data-zchatgpt-pref="models-note"]').textContent ?? '';
@@ -370,7 +379,7 @@ it('explains the live list when the running runtime reports models', async () =>
 });
 
 it('keeps the bundled copy when the runtime reports models none of which are offerable', async () => {
-  // The runtime is running and reported models, but only excluded families: no row joins from it, so
+  // The runtime is running and reported models, but no current model: no row joins from it, so
   // the "this combines what the runtime reported" sentence would be false and is not shown.
   const { host } = fixture(undefined, { readLiveModels: () => Promise.resolve(['gpt-5.5', 'gpt-5.4', 'codex-auto-review']) });
   const { ready, root, find } = mount(host);
@@ -388,7 +397,7 @@ it('keeps the bundled catalog list when the live read fails instead of half-rend
   const { ready, root, find } = mount(host);
   await ready;
   expect([...find('[data-zchatgpt-pref="models"]').querySelectorAll<HTMLElement>('.zchatgpt-preferences-model')].map(row => row.dataset.zchatgptModel))
-    .toEqual(['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna']);
+    .toEqual(['gpt-6-sol', 'gpt-6-astra', 'gpt-6-luna']);
   expect(find('[data-zchatgpt-pref="models-note"]').textContent).toMatch(/bundled catalog, not your account/u);
   expect(root.querySelector<HTMLElement>('[data-zchatgpt-pref="error"]')?.hidden).toBe(true);
 });
@@ -428,14 +437,15 @@ it('renders the pane copy in the stored UI language and never translates identif
   const { ready, root, find } = mount(host);
   await ready;
   const label = (pref: string): string => find(`[data-zchatgpt-pref="${pref}"]`).closest('label')?.firstChild?.textContent ?? '';
-  expect([...find('[data-zchatgpt-pref="form"]').querySelectorAll('legend')].map(node => node.textContent)).toEqual(['通用', '对话', 'Agent']);
+  expect([...find('[data-zchatgpt-pref="form"]').querySelectorAll('legend')].map(node => node.textContent)).toEqual(['通用', 'Agent']);
+  expect(find('[data-zchatgpt-pref="models-note"]').closest('details')?.open).toBe(false);
   // The model note is stateful copy that follows the stored language; the key now exists, so it is
   // asserted exactly instead of accepting the untranslated English source.
-  expect(find('[data-zchatgpt-pref="models-note"]').textContent).toBe('勾选的模型会在 Agent 请求中提供；右侧确切 id 就是实际发送的 id。来源：随包目录（并非你账户的实时权限），外加正在运行的运行时报告的任何 GPT-5.3-Spark。');
+  expect(find('[data-zchatgpt-pref="models-note"]').textContent).toBe('勾选的模型会在 Agent 请求中提供；右侧确切 id 就是实际发送的 id。来源：随包目录，并非你账户的实时权限。');
   expect(label('uiLanguage')).toBe('界面语言');
   expect(label('textScale')).toBe('Agent 文字大小（0.5–3）');
-  expect(label('automatic-pdf-text')).toBe('自动使用当前 PDF 文本');
-  expect(label('preference-background')).toBe('指令');
+  expect(label('automatic-pdf-text')).toBe('自动使用当前文献信息上下文');
+  expect(label('preference-background')).toBe('Agent 指令');
   // The withdrawn builtin rows are simply absent; the owner's own workflows still render.
   expect(root.querySelector('[data-zchatgpt-skill="builtin-read"]')).toBeNull();
   expect(root.querySelector('[data-zchatgpt-skill="builtin-derive"]')).toBeNull();
@@ -451,8 +461,8 @@ it('renders the pane copy in the stored UI language and never translates identif
   expect(skillRow('imported-blocked').querySelector('span')?.textContent).toBe('Blocked');
   expect(skillRow('imported-blocked').querySelector('.zchatgpt-preferences-muted')?.textContent).toBe('imported · v1.0 · read · 不可用：mcp');
   // Model names and ids are data, not copy: the derived label and the exact id stay verbatim.
-  expect(root.querySelector('[data-zchatgpt-model="gpt-5.6-sol"] label')?.textContent).toBe('GPT-5.6 Sol');
-  expect(root.querySelector('[data-zchatgpt-model="gpt-5.6-sol"] .zchatgpt-preferences-muted')?.textContent).toBe('gpt-5.6-sol');
+  expect(root.querySelector('[data-zchatgpt-model="gpt-6-astra"] label')?.textContent).toBe('GPT-6 Astra');
+  expect(root.querySelector('[data-zchatgpt-model="gpt-6-astra"] .zchatgpt-preferences-muted')?.textContent).toBe('gpt-6-astra');
 });
 
 it('follows a language change in both directions and reports the outcome in that language', async () => {
@@ -462,14 +472,14 @@ it('follows a language change in both directions and reports the outcome in that
   const label = (pref: string): string => find(`[data-zchatgpt-pref="${pref}"]`).closest('label')?.firstChild?.textContent ?? '';
   expect(label('uiLanguage')).toBe('Interface language');
   expect(label('textScale')).toBe('Agent text size (0.5–3)');
-  expect(label('preference-background')).toBe('Instructions');
+  expect(label('preference-background')).toBe('Instructions for Agent');
   const language = find<HTMLSelectElement>('[data-zchatgpt-pref="uiLanguage"]');
   language.value = 'zh'; change(language);
   await settle();
   expect(current().uiLanguage).toBe('zh');
   expect(label('uiLanguage')).toBe('界面语言');
   expect(label('textScale')).toBe('Agent 文字大小（0.5–3）');
-  expect(label('preference-background')).toBe('指令');
+  expect(label('preference-background')).toBe('Agent 指令');
   expect(find<HTMLButtonElement>('[data-zchatgpt-pref="save-preferences"]').textContent).toBe('保存');
   // The pane announces its own write in the language it is now showing.
   expect(find<HTMLElement>('[data-zchatgpt-pref="status"]').textContent).toBe('界面语言已保存。');
@@ -504,20 +514,16 @@ it('shows an unsaved indicator only while the instructions box differs from the 
   await vi.waitFor(() => expect(unsaved.hidden).toBe(true));
 });
 
-it('puts the Agent instructions heading, scope note and Save row around the box in reading order', async () => {
+it('puts the concise Agent instructions field before its Save row', async () => {
   const { host } = fixture();
   const { ready, find } = mount(host);
   await ready;
-  const agent = find('[data-zchatgpt-pref="instructions-note"]').closest('fieldset')!;
+  const agent = find('[data-zchatgpt-pref="save-preferences"]').closest('fieldset')!;
   const children = [...agent.children];
-  const order = children.map(node => node.getAttribute('data-zchatgpt-pref') ?? node.tagName.toLowerCase());
-  const note = order.indexOf('instructions-note');
-  const box = order.indexOf('label');
-  expect(note).toBeGreaterThanOrEqual(0);
-  // The heading and scope note precede the box; the Save row that owns the button follows it.
-  expect(box).toBeGreaterThan(note);
+  const box = children.findIndex(node => node.getAttribute('data-zchatgpt-pref') === 'preference-background' || node.querySelector('[data-zchatgpt-pref="preference-background"]'));
+  expect(box).toBeGreaterThanOrEqual(0);
   const saveIndex = children.findIndex(node => node.querySelector('[data-zchatgpt-pref="save-preferences"]'));
   expect(saveIndex).toBeGreaterThan(box);
-  expect(find('[data-zchatgpt-pref="instructions-note"]').textContent).toBe('Applies only to Agent requests.');
+  expect(agent.querySelector('[data-zchatgpt-pref="instructions-note"]')).toBeNull();
   expect(find('[data-zchatgpt-pref="save-preferences"]').closest('.zchatgpt-preferences-save-row')).not.toBeNull();
 });

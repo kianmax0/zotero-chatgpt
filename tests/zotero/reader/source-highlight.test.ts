@@ -1,7 +1,7 @@
 import { expect, it, vi } from 'vitest';
 import { ReaderError } from '../../../packages/contracts/src/index.ts';
 import type { LocatedPosition } from '../../../packages/zotero/src/reader/locate.ts';
-import { openSourcePage, type SourcePageNavigator, type SourcePageTarget } from '../../../packages/zotero/src/reader/source-highlight.ts';
+import { openFigureSelection, openSourcePage, type SourcePageNavigator, type SourcePageTarget } from '../../../packages/zotero/src/reader/source-highlight.ts';
 import { paperA } from '../../contracts/factories.ts';
 
 const target: SourcePageTarget = { paper: paperA, revision: { fingerprint: 'synthetic', size: 200, modifiedAt: 1000, sha256: 'a'.repeat(64) } };
@@ -32,6 +32,16 @@ it('navigates to the cited page when no quote was supplied', async () => {
   await expect(openSourcePage(nav, target, 3, null)).resolves.toBe('opened');
   expect(nav.locate).not.toHaveBeenCalled();
   expect(nav.navigate).toHaveBeenCalledWith(3, null);
+});
+
+it('opens a saved Figure at its frozen rectangle only after validating the PDF revision', async () => {
+  const selection = { ...target, pageIndex: 7, rect: [72, 500, 300, 512] as [number, number, number, number] };
+  const nav = navigator(); await openFigureSelection(nav, selection);
+  expect(nav.validate).toHaveBeenCalledWith(target);
+  expect(nav.navigate).toHaveBeenCalledWith(7, { pageIndex: 7, rects: [[72, 500, 300, 512]] });
+  const changed = navigator({ validate: vi.fn<SourcePageNavigator['validate']>().mockRejectedValue(new ReaderError('INVALID_REQUEST', 'The PDF changed.')) });
+  await expect(openFigureSelection(changed, selection)).rejects.toThrow('The PDF changed.');
+  expect(changed.navigate).not.toHaveBeenCalled();
 });
 
 it('highlights only when the quote is located on the cited page', async () => {

@@ -1,5 +1,5 @@
-import { NativeOperationError, type NativeActionPort, type NativeMetadata, type NativeOrganizationItemSnapshot } from '../../packages/contracts/src/native.ts';
-import { ReaderError, type DocumentContext, type PaperScope } from '../../packages/contracts/src/index.ts';
+import { NativeOperationError, type NativeActionPort, type NativeFigureCalloutInput, type NativeFigureSelection, type NativeMetadata, type NativeOrganizationItemSnapshot } from '../../packages/contracts/src/native.ts';
+import { ReaderError, type DocumentContext, type ImageAttachment, type PaperScope } from '../../packages/contracts/src/index.ts';
 import type { LibraryReferencePort } from '../../packages/contracts/src/workspace.ts';
 import { ActionTaskController } from '../../packages/core/src/tasks/controller.ts';
 import { createNativeActionPortFrom } from '../../packages/zotero/src/actions/native.ts';
@@ -36,7 +36,7 @@ interface SmokeWindow extends ZoteroWindow {
 }
 interface SmokeReader extends HostReader { tabID: string; _window: SmokeWindow; _initPromise?: Promise<void>; close(): void }
 interface SmokeLibrary { libraryID: number; editable: boolean; filesEditable: boolean; waitForDataLoad(type: 'item' | 'collection'): Promise<void> }
-interface SmokeZotero extends Omit<NativeZoteroHost, 'Item' | 'Items' | 'Reader' | 'Libraries' | 'Collections' | 'Utilities' | 'Attachments'> {
+interface SmokeZotero extends Omit<NativeZoteroHost, 'Item' | 'Items' | 'Reader' | 'Libraries' | 'Collections' | 'Utilities' | 'Attachments' | 'Annotations'> {
   version: string;
   initializationPromise: Promise<void>;
   DataDirectory: { dir: string };
@@ -53,7 +53,8 @@ interface SmokeZotero extends Omit<NativeZoteroHost, 'Item' | 'Items' | 'Reader'
   };
   Reader: { _readers: SmokeReader[]; open(id: number, location?: unknown, options?: { tabID?: string; allowDuplicate?: boolean; openInBackground?: boolean }): Promise<SmokeReader>; getByTabID(id: string): SmokeReader | undefined };
   Libraries: { userLibraryID: number; get(id: number): SmokeLibrary | undefined };
-  Collections: { get(id: number): SmokeCollection | false | undefined; getByLibraryAndKey(libraryID: number, key: string): SmokeCollection | false | undefined };
+  Collections: { get(id: number): SmokeCollection | false | undefined; getByLibraryAndKey(libraryID: number, key: string): SmokeCollection | false | undefined; getByLibrary(libraryID: number, recursive: boolean, includeTrashed: boolean): SmokeCollection[] };
+  Annotations: NativeZoteroHost['Annotations'] & { hasCacheImage(item: SmokeItem): Promise<boolean> };
   Utilities: NativeZoteroHost['Utilities'] & { generateObjectKey(): string };
   Attachments: NativeZoteroHost['Attachments'] & { importFromFile(options: { file: string; parentItemID: number; title: string; saveOptions: { skipSelect: true } }): Promise<SmokeItem> };
   Notifier: { registerObserver(observer: { notify(event: string, type: string, ids: Array<string | number>): void }, types: string[], name: string): string; unregisterObserver(id: string): void };
@@ -100,6 +101,7 @@ function safeFailure(error: unknown): { code: string; message?: string } {
   return { code: 'UNEXPECTED_NATIVE_ERROR', message: [name, ...knownFrames, ...locations, ...properties].join(' / ') };
 }
 async function digest(bytes: Uint8Array): Promise<string> { return [...new Uint8Array(await crypto.subtle.digest('SHA-256', new Uint8Array(bytes)))].map(value => value.toString(16).padStart(2, '0')).join(''); }
+async function digestText(value: string): Promise<string> { return digest(new TextEncoder().encode(value)); }
 function tabInfo(window: SmokeWindow, id: string) { try { return window.Zotero_Tabs.getTabInfo(id); } catch { return undefined; } }
 
 /** Test-only entrypoint. Importing this file never runs it or opens a reader. */
@@ -378,6 +380,70 @@ export async function runHostSmoke(config: NativeSmokeConfig): Promise<NativeSmo
     });
     const references = createLibraryReferencePort(Zotero, { clientId, documentCache: cache, uuid: () => host.uuid(), getWindow: () => window });
     const referencePort: LibraryReferencePort = references;
+    const figureSelection: NativeFigureSelection = { paper, revision: document.revision, pageIndex: 0, rect: [40, 400, 540, 760] };
+    const figureProposal = { box: [0.1, 0.2, 0.5, 0.6] as [number, number, number, number], strokes: [[[0.1, 0.2], [0.3, 0.6], [0.5, 0.2]] as Array<[number, number]>], explanation: 'Synthetic callout: the boxed area illustrates this figure panel.' };
+    const figureReview = await step('figure-crop-review-freezes-region-without-writing', 'synthetic-proposal-real-host-write', async () => {
+      guard(); await fixture.main.loadAllData(); const annotationsBefore = fixture.main.getAnnotations().length;
+      const image: ImageAttachment = await references.captureRegion(figureSelection);
+      requireCheck(image.mime === 'image/png' && image.origin?.kind === 'paper' && image.origin.paper.attachmentKey === paper.attachmentKey && image.origin.pageIndex === figureSelection.pageIndex && image.origin.revision.sha256 === document.revision.sha256, 'FIGURE_CROP_ORIGIN_INVALID');
+      const task = await taskController.planFigureAnnotations({ conversationId: host.uuid(), question: 'Synthetic smoke: explain and call out this figure region.', modelRequestId: host.uuid(), selection: figureSelection, image, proposals: [figureProposal] });
+      requireCheck(task.kind === 'figure-annotations' && task.state === 'review' && task.selection.pageIndex === figureSelection.pageIndex && task.selection.rect.every((value, index) => value === figureSelection.rect[index]) && task.items.length === 1 && task.items[0]?.status === 'candidate', 'FIGURE_REVIEW_NOT_FROZEN');
+      const item = task.items[0]; requireCheck(item?.kind === 'figure-callout' && item.reservedKey !== item.inkKey, 'FIGURE_RESERVED_KEYS_INVALID');
+      requireCheck(!Zotero.Items.getByLibraryAndKey(libraryID, item.reservedKey) && !Zotero.Items.getByLibraryAndKey(libraryID, item.inkKey) && fixture.main.getAnnotations().length === annotationsBefore, 'FIGURE_PREAPPROVAL_WRITE_DETECTED');
+      return { value: { task, item, image, input: { selection: figureSelection, image, index: 0, imageKey: item.reservedKey, inkKey: item.inkKey, proposal: figureProposal } satisfies NativeFigureCalloutInput, annotationsBefore }, details: { taskId: task.id, physicalPageIndex: figureSelection.pageIndex, selectedRectanglePoints: figureSelection.rect, cropMime: image.mime, cropOriginRevisionMatches: true, callouts: 1, nativeWritesBeforeApproval: 0, modelProposalSource: 'deterministic-synthetic-fixture' } };
+    });
+    requireCheck(figureReview, 'FIGURE_REVIEW_UNAVAILABLE');
+    const figureApplied = await step('figure-approval-writes-native-image-ink-and-cached-png', 'synthetic-proposal-real-host-write', async () => {
+      guard(); const approved = await taskController.approve(figureReview.task.id, [figureReview.item.id]);
+      const itemAfterApproval = approved.kind === 'figure-annotations' ? approved.items[0] : undefined;
+      let inspectionStatus = 'unavailable';
+      try { inspectionStatus = (await native.inspectFigureCallout(figureReview.input)).status; } catch { inspectionStatus = 'inspection-failed'; }
+      const expectedLabel = 'A: Synthetic callout: the boxed area illustrates this figure panel.';
+      const inspectCalloutItem = async (key: string, type: 'image' | 'ink') => {
+        const item = Zotero.Items.getByLibraryAndKey(libraryID, key); if (!item) return { exists: false };
+        await item.loadAllData(); const json = await Zotero.Annotations.toJSON(item);
+        let position: unknown = null; try { position = JSON.parse(item.annotationPosition ?? '{}'); } catch { /* Keep only the invalid-source status. */ }
+        return {
+          exists: true, annotationType: item.annotationType, parentMatches: item.parentID === fixture.main.id,
+          provenancePresent: item.annotationComment?.startsWith('[AI · Zotero ChatGPT]') === true,
+          expectedCommentPresent: type === 'image' ? item.annotationComment?.includes(expectedLabel) === true : item.annotationComment?.includes('A callout') === true,
+          color: item.annotationColor, pageLabel: item.annotationPageLabel, sortIndexValid: /^\d{5}\|\d{6}\|\d{5}$/u.test(item.annotationSortIndex ?? ''),
+          isExternal: item.annotationIsExternal, tags: item.getTags().length, position,
+          cachePresent: typeof json.image === 'string', cacheMatchesFrozenCrop: json.image === figureReview.image.dataUrl,
+          cacheHashMatchesFrozenCrop: typeof json.image === 'string' ? await digestText(json.image) === await digestText(figureReview.image.dataUrl) : false,
+        };
+      };
+      const details: Record<string, unknown> = { taskState: approved.state, itemStatus: itemAfterApproval?.status ?? 'missing', errorCode: itemAfterApproval?.errorCode ?? null, operation: itemAfterApproval?.operation ?? null, nativePairInspection: inspectionStatus };
+      if (approved.kind === 'figure-annotations' && approved.state !== 'completed') details.nativeReadback = { image: await inspectCalloutItem(figureReview.item.reservedKey, 'image'), ink: await inspectCalloutItem(figureReview.item.inkKey, 'ink') };
+      report.checks.at(-1)!.details = details;
+      await save();
+      requireCheck(approved.kind === 'figure-annotations' && approved.state === 'completed' && approved.items[0]?.kind === 'figure-callout' && approved.items[0].status === 'applied' && approved.items[0].callout, 'FIGURE_APPROVAL_FAILED');
+      const callout = approved.items[0].callout;
+      const area = Zotero.Items.getByLibraryAndKey(libraryID, figureReview.item.reservedKey); const ink = Zotero.Items.getByLibraryAndKey(libraryID, figureReview.item.inkKey);
+      requireCheck(area && ink && area.isAnnotation() && ink.isAnnotation() && area.annotationType === 'image' && ink.annotationType === 'ink' && area.parentID === fixture.main.id && ink.parentID === fixture.main.id, 'FIGURE_NATIVE_ANNOTATION_TYPES_INVALID');
+      await fixture.main.loadAllData();
+      const [areaJSON, inkJSON, inspection] = await Promise.all([Zotero.Annotations.toJSON(area), Zotero.Annotations.toJSON(ink), native.inspectFigureCallout(figureReview.input)]);
+      requireCheck(typeof areaJSON.image === 'string' && areaJSON.image.startsWith('data:image/png;base64,') && typeof inkJSON.image === 'string' && inkJSON.image.startsWith('data:image/png;base64,'), 'FIGURE_NATIVE_CACHE_IMAGE_READBACK_FAILED');
+      requireCheck(inspection.status === 'complete' && JSON.stringify(inspection.callout) === JSON.stringify(callout), 'FIGURE_NATIVE_TASK_READBACK_MISMATCH');
+      const imagePosition = callout.image.position; const inkPosition = callout.ink.position;
+      requireCheck('rects' in imagePosition && 'paths' in inkPosition, 'FIGURE_NATIVE_POSITION_KINDS_INVALID');
+      const imageRect = imagePosition.rects[0]; const inkPath = inkPosition.paths[0];
+      requireCheck(imageRect?.every((value, index) => Math.abs(value - [90, 544, 290, 688][index]!) < 0.001), 'FIGURE_IMAGE_COORDINATE_TRANSFORM_INVALID');
+      requireCheck(inkPath?.every((value, index) => Math.abs(value - [90, 688, 190, 544, 290, 688][index]!) < 0.001), 'FIGURE_INK_COORDINATE_TRANSFORM_INVALID');
+      requireCheck(callout.image.imageSHA256 === await digestText(String(areaJSON.image)) && callout.ink.imageSHA256 === await digestText(String(inkJSON.image)), 'FIGURE_CACHE_HASH_READBACK_FAILED');
+      return { value: { approved, area, ink }, details: { taskId: approved.id, imageKey: callout.image.key, inkKey: callout.ink.key, imageType: callout.image.type, inkType: callout.ink.type, imageRect, inkPaths: inkPosition.paths.length, cachedPNGsVerified: true, zoteroAreaCacheRegeneratedFromNativeBounds: areaJSON.image !== figureReview.image.dataUrl, exactNativeReadback: true, deterministicProposal: true } };
+    });
+    requireCheck(figureApplied, 'FIGURE_APPLY_UNAVAILABLE');
+    await step('figure-undo-removes-both-task-items-and-cache-readback', 'synthetic-proposal-real-host-write', async () => {
+      guard(); const result = await taskController.undo(figureApplied.approved.id); await fixture.main.loadAllData();
+      const area = Zotero.Items.getByLibraryAndKey(libraryID, figureReview.item.reservedKey); const ink = Zotero.Items.getByLibraryAndKey(libraryID, figureReview.item.inkKey);
+      const [areaCache, inkCache] = await Promise.all([Zotero.Annotations.hasCacheImage(figureApplied.area), Zotero.Annotations.hasCacheImage(figureApplied.ink)]);
+      const inspection = await native.inspectFigureCallout(figureReview.input);
+      requireCheck(result.kind === 'figure-annotations' && result.state === 'undone' && !area && !ink && inspection.status === 'absent', 'FIGURE_NATIVE_UNDO_FAILED');
+      requireCheck(!areaCache && !inkCache && fixture.main.getAnnotations().length === figureReview.annotationsBefore, 'FIGURE_TASK_OUTPUT_OR_CACHE_REMAINS');
+      requireCheck((await source.capture()).revision.sha256 === document.revision.sha256, 'FIGURE_UNDO_CHANGED_PDF_BYTES');
+      return { value: true, details: { taskId: result.id, remainingTaskOwnedAnnotations: 0, remainingTaskOwnedCacheImages: 0, unrelatedAnnotationsPreserved: true, attachmentRetained: true, pdfHashUnchanged: true } };
+    });
     await verifyReferenceImagesAndReaders({ report, step, host, contextRoot, window, opened, paper, supplementPaper, document, fixture, references, referencePort, verificationToken, until });
     await step('native-metadata-create-and-undo-use-synthetic-data', 'real-host-api', async () => {
       const reservedKey = Zotero.Utilities.generateObjectKey(); const metadata: NativeMetadata = { itemType: 'journalArticle', title: `[SYNTHETIC METADATA FIXTURE] ${report.runId}`, creators: [], abstractNote: 'Local deterministic mock metadata, not obtained from a model or network. Tests only native item/collection writes.' };

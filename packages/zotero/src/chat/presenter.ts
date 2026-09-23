@@ -3,18 +3,18 @@ import { clone } from '../../../contracts/src/clone.ts';
 import { advanceRequestTiming, ReaderError, paperId, type Citation, type ContextReport, type Conversation, type DocumentContext, type GenerationSettings, type ImageAttachment, type Message, type OrganizationContext, type PaperIdentity, type PaperScope, type ReaderEvent, type RequestMode, type SendInput } from '../../../contracts/src/index.ts';
 import type { HistoryChange, HistoryEntry, LibraryReferencePort, Personalization, ReaderReference, ReaderSkill, ReaderWorkspace, ReferenceInput, ResearchProfile, SavedDraft, WorkflowSnapshot, WorkspaceDraft, WorkspaceSettings } from '../../../contracts/src/workspace.ts';
 import { citationFromAnnotation, parseAnnotationCandidates, parseOrganizationProposals, type ActionTaskChoices, type ActionTaskRecord, type ActionTasks } from '../../../contracts/src/tasks.ts';
-import type { NativeCollectionTarget, NativeItemRef } from '../../../contracts/src/native.ts';
+import type { NativeCollectionTarget, NativeFigureSelection, NativeItemRef } from '../../../contracts/src/native.ts';
 import { validatePreferences, validateReference, validateReferenceInput, validateWorkflow } from '../../../contracts/src/workspace-validation.ts';
 import { LIMITS, validateImageAttachment, validateOutputImage } from '../../../contracts/src/validation.ts';
 import { estimateRequestBudget, type ContextBudget } from '../../../core/src/codex/model-capabilities.ts';
 import { planContext, type ContextPlan } from '../../../core/src/context/planner.ts';
 import type { ReadingJob } from '../../../core/src/context/coordinator.ts';
 import { conversationHasAgentWork } from '../../../core/src/chat/agent-work.ts';
-import { documentBrief } from '../../../core/src/chat/document-brief.ts';
 import { paperContext } from '../../../core/src/chat/paper-context.ts';
 import { addCitation, addImage, makeAsk, makeExplain, moveImage, removeCitation, removeImage, workspaceDraft } from './draft.ts';
 import { pluginClipboardAccess, readGeckoClipboardImage, type ClipboardImageRead } from './pick-images.ts';
 import { alignSettings, catalogDefaultSettings } from './generation-settings.ts';
+import { enforcedAllowedModelIds } from '../../../core/src/workspace/allowed-models.ts';
 import type { DocumentServices, ReaderContext } from '../reader/context.ts';
 import type { PresenterAgent, PresenterReading } from './capability.ts';
 import { executeAgentSend, requestsCurrentPaperAnnotations, requestsSelectionOrganization, type AgentSendContext } from './agent-execution.ts';
@@ -68,6 +68,7 @@ export interface PresenterServices {
   getWorkspace?(): Promise<ReaderWorkspace>; library?: LibraryReferencePort; agent?: PresenterAgent;
   openHistory?(paper: PaperScope, conversationId: string): Promise<void>;
   openCitation?(citation: Citation): Promise<void>; openItem?(item: NativeItemRef): Promise<void>;
+  openFigurePage?(selection: NativeFigureSelection): Promise<void>;
   /**
    * Re-reads the bibliographic identity of one attachment from the local Zotero metadata, addressed
    * by the frozen `PaperScope` rather than "whatever the reader shows now". Optional: without it the
@@ -372,9 +373,10 @@ export class ConversationPresenter {
   }
   private currentSettings(): GenerationSettings | null {
     const models = this.state.runtime?.models ?? [];
-    const current = this.state.draft.settings ?? this.state.conversation?.settings ?? catalogDefaultSettings(models);
+    const allowedIds = enforcedAllowedModelIds(this.state.workspace?.allowedModels);
+    const current = this.state.draft.settings ?? this.state.conversation?.settings ?? catalogDefaultSettings(models, allowedIds);
     if (!current) return null;
-    return models.length ? alignSettings(models, current) : current;
+    return models.length ? alignSettings(models, current, allowedIds) : current;
   }
   private draftKey(): string { return this.state.conversation?.id ?? 'unbound'; }
   private transferUnboundMode(conversationId: string): void {
@@ -513,6 +515,27 @@ export class ConversationPresenter {
   private changeDraft(draft: WorkspaceDraft): void {
     if (draft === this.state.draft) return;
     this.draftVersion++; this.update({ draft, message: null }); this.stageDraft();
+  }
+  /** Apply a committed Preferences snapshot to this live view without touching submitted requests. */
+  refreshWorkspaceSettings(settings: WorkspaceSettings): void {
+    if (this.disposed) return;
+    const workspace = clone(settings);
+    const models = this.state.runtime?.models ?? [];
+    const allowedIds = enforcedAllowedModelIds(workspace.allowedModels);
+    let draft = this.state.draft;
+    if (models.length && draft.settings) {
+      const aligned = alignSettings(models, draft.settings, allowedIds);
+      if (aligned.model !== draft.settings.model || aligned.serviceTier !== draft.settings.serviceTier || aligned.effort !== draft.settings.effort) {
+        draft = { ...draft, settings: aligned };
+      }
+    }
+    if (draft !== this.state.draft) {
+      this.draftVersion++;
+      this.update({ workspace, draft });
+      this.stageDraft();
+      return;
+    }
+    this.update({ workspace });
   }
   private entryFromConversation(conversation: Conversation): HistoryEntry {
     return { id: conversation.id, paper: conversation.paper, title: conversation.title, identity: conversation.paperIdentity ?? { title: conversation.title, authors: [] }, createdAt: conversation.createdAt, updatedAt: conversation.updatedAt, messageCount: conversation.messages.length, preview: conversation.messages.at(-1)?.text ?? '', hasDraft: !!this.drafts.get(conversation.id)?.question.trim(), activeRequestId: conversation.activeRequestId, ...(conversation.archivedAt ? { archivedAt: conversation.archivedAt } : {}) };
@@ -752,12 +775,22 @@ export class ConversationPresenter {
     try {
       const tasks = await this.getTasks();
       const kind = workflow === 'annotate' ? 'annotations' : 'organization';
-      if ((await tasks.list(conversation.id)).some(task => task.kind === kind && task.modelRequestId === requestId)) return;
+      const autoApply = user.workflow?.autoApplyAnnotations === true;
+      const existing = (await tasks.list(conversation.id)).find(task => task.kind === kind && task.modelRequestId === requestId);
+      if (existing) {
+        // A newly created auto-annotate task may have reached durable review just before shutdown.
+        // Resume only that explicitly marked task; historical review tasks remain manual.
+        if (existing.kind === 'annotations' && existing.autoApply && existing.state === 'review' && !existing.approvedAt) {
+          const selected = existing.items.filter(item => item.status === 'candidate' && item.resolution?.status === 'resolved').map(item => item.id);
+          if (selected.length) this.acceptTask(await tasks.approve(existing.id, selected));
+        }
+        return;
+      }
       if (workflow === 'annotate') {
         const origin = user.document ?? (user.batch ? conversation.messages.find(message => message.role === 'user' && message.batch?.id === user.batch?.id && message.document)?.document : undefined);
         if (!origin) throw new ReaderError('INVALID_REQUEST', 'Annotation proposals have no frozen PDF version. Prepare the PDF and try again.');
         const candidates = parseAnnotationCandidates(answer.text);
-        this.acceptTask(await tasks.planAnnotations({ conversationId: conversation.id, paper: clone(conversation.paper), revision: clone(origin.revision), question: user.batch?.question ?? user.text, candidates, modelRequestId: requestId }));
+        this.acceptTask(await tasks.planAnnotations({ conversationId: conversation.id, paper: clone(conversation.paper), revision: clone(origin.revision), question: user.batch?.question ?? user.text, candidates, modelRequestId: requestId, ...(autoApply ? { autoApply: true as const } : {}) }));
       } else {
         if (!user.organization) throw new ReaderError('INVALID_REQUEST', 'Organization proposals have no frozen Zotero selection. Select the items and try again.');
         const proposals = parseOrganizationProposals(answer.text);
@@ -799,6 +832,10 @@ export class ConversationPresenter {
     const task = await (await this.getTasks()).get(id); const item = task.items.find(item => item.id === itemId);
     if (!item || item.status === 'undone') throw new ReaderError('NOT_FOUND', 'This task has no available recorded output.');
     if (item.kind === 'annotation' && item.annotation) { await this.openTaskSource(id, itemId); return; }
+    if (item.kind === 'figure-callout' && item.callout && task.kind === 'figure-annotations') {
+      if (!this.services.openFigurePage) throw new ReaderError('UNSUPPORTED_INTERACTION', 'Figure output navigation is unavailable.');
+      await this.services.openFigurePage(task.selection); return;
+    }
     if (item.kind === 'acquisition' && item.item) {
       if (item.acquisition?.status === 'attached' && !item.attachmentUndone && this.services.library) {
         const attachment = item.acquisition.attachment; await this.services.library.open({ clientId: attachment.clientId, libraryId: attachment.libraryId, attachmentKey: attachment.key }); return;
@@ -858,7 +895,8 @@ export class ConversationPresenter {
   /** Draft only: never edits an in-flight or already-submitted message snapshot. */
   setSettings(settings: GenerationSettings): void {
     const models = this.state.runtime?.models ?? [];
-    const next = models.length ? alignSettings(models, settings) : { model: settings.model, serviceTier: settings.serviceTier, effort: settings.effort };
+    const allowedIds = enforcedAllowedModelIds(this.state.workspace?.allowedModels);
+    const next = models.length ? alignSettings(models, settings, allowedIds) : { model: settings.model, serviceTier: settings.serviceTier, effort: settings.effort };
     this.changeDraft({ ...this.state.draft, settings: next });
   }
   // ---- runtime ----------------------------------------------------------------------------------
@@ -912,27 +950,18 @@ export class ConversationPresenter {
   prepareContext(): Promise<DocumentContext> { return this.prepareDocument(this.state.document.range); }
   /**
    * The current paper as clipboard text, for Chat mode's hosted application. The web app owns its own
-   * conversation and this host has no supported way to inject context into it, so the owner is handed
-   * the text they paste themselves. That makes this a local read, not a request: it may start the PDF
-   * read the hosted surface never needed, and it touches no Codex session, task, tool or approval.
+   * conversation and this host has no supported way to inject context into it. This compatibility
+   * method returns only the bibliography and stored abstract; it never prepares or reads PDF pages.
    */
   async exportDocumentBrief(): Promise<DocumentBriefResult> {
-    if (!this.state.document.enabled) return { ok: false, reason: 'unavailable' };
-    try {
-      const brief = documentBrief(this.identity, await this.prepareContext());
-      if (!brief) return { ok: false, reason: 'no-text' };
-      return { ok: true, text: brief.text, pages: brief.included, totalPages: brief.totalPages, truncated: brief.truncated };
-    } catch {
-      // The reading failure is already reported on the presenter's own error surface; the clipboard
-      // call site only needs to know that nothing was copied.
-      return { ok: false, reason: 'failed' };
-    }
+    const context = await this.exportPaperContext();
+    if (!context.ok) return { ok: false, reason: context.reason === 'no-info' ? 'no-text' : 'failed' };
+    return { ok: true, text: context.text, pages: 0, totalPages: 0, truncated: false };
   }
   /**
    * The paper's bibliographic context as clipboard text: title, authors, publication, year, DOI and
-   * the stored abstract. This is the manual copy button's content and it never reads the PDF — the
-   * automatic context that ChatGPT receives still goes through `documentBrief`, so trimming this
-   * copy cannot silently shrink what a send carries.
+   * the stored abstract. This is also the exact compact paper context automatically included by
+   * Chat; neither path reads PDF body text.
    *
    * The scope is frozen before the await and any optional re-read is addressed by that frozen scope,
    * so a slower read for paper A can never return while the reader shows B and paste A's title with
@@ -1023,7 +1052,7 @@ export class ConversationPresenter {
     if (this.disposed) return;
     let draft = this.state.draft;
     if (snapshot.models.length && draft.settings) {
-      const aligned = alignSettings(snapshot.models, draft.settings);
+      const aligned = alignSettings(snapshot.models, draft.settings, enforcedAllowedModelIds(this.state.workspace?.allowedModels));
       if (aligned.model !== draft.settings.model || aligned.serviceTier !== draft.settings.serviceTier || aligned.effort !== draft.settings.effort) {
         draft = { ...draft, settings: aligned };
       }
@@ -1386,7 +1415,7 @@ export class ConversationPresenter {
     if (draft.skillId && (!skill || !skill.enabled)) throw new ReaderError('UNSUPPORTED_INTERACTION', 'The selected skill is unavailable or disabled.');
     if (inferredAnnotation && !skill) throw new ReaderError('UNSUPPORTED_INTERACTION', 'The built-in annotation workflow is unavailable or disabled. Enable it before asking Agent to highlight the current paper.');
     if (inferredOrganization && !skill) throw new ReaderError('UNSUPPORTED_INTERACTION', 'The built-in organization workflow is unavailable or disabled. Enable it before asking Agent to organize the selected items.');
-    return validateWorkflow({ skill: skill ?? null, profileId: profile ? draft.profileId : null, preferences: { ...settings.preferences, ...profile?.preferences, ...draft.overrides } });
+    return validateWorkflow({ skill: skill ?? null, profileId: profile ? draft.profileId : null, preferences: { ...settings.preferences, ...profile?.preferences, ...draft.overrides }, ...(mode === 'agent' && skill?.workflow === 'annotate' ? { autoApplyAnnotations: true } : {}) });
   }
   /**
    * Does this draft still point at a research profile that exists? When it does not, the dead
@@ -1457,7 +1486,12 @@ export class ConversationPresenter {
       // Last line of defence: no Chat request may reach the shared service without a Chat transport,
       // so Chat can never be routed to Codex by a path that forgot to check.
       if (mode === 'chat') { const reason = this.services.chatUnavailableReason(); if (reason) throw new ReaderError('UNSUPPORTED_INTERACTION', reason); }
-      const workflow = this.frozenWorkflow(draft, configuration ?? this.state.workspace, mode, input.question);
+      // Preferences can change after the visible composer was rendered. Constrain the frozen request
+      // against the fresh settings snapshot, without rewriting the stored conversation snapshot.
+      const models = this.state.runtime?.models ?? [];
+      const workspaceSettings = configuration ?? this.state.workspace;
+      if (models.length) input.settings = alignSettings(models, input.settings, enforcedAllowedModelIds(workspaceSettings?.allowedModels));
+      const workflow = this.frozenWorkflow(draft, workspaceSettings, mode, input.question);
       if (workflow) input.workflow = workflow;
       const skillWorkflow = workflow?.skill?.workflow ?? null;
       // Stage 6/8: the composer's mode control is the single authority for `mode`; `workflow` never

@@ -1,5 +1,6 @@
 // Shared business contracts. Runtime validation lives in ./validation.ts and must be applied at
 // every boundary; TypeScript types alone are not trusted for input crossing modules.
+export type { NormalizedScholarlyDiscoveryRequest, ScholarlyDiscoveryCandidate, ScholarlyDiscoveryPort, ScholarlyDiscoveryPreview, ScholarlyDiscoveryRequest } from './discovery.ts';
 export type UUID = string;
 export type Rect = [number, number, number, number];
 

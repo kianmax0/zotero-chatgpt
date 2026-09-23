@@ -1,4 +1,5 @@
 import { ReaderError, type DocumentRevision, type PaperScope, type Rect } from '../../../contracts/src/index.ts';
+import type { NativeFigureSelection } from '../../../contracts/src/native.ts';
 import { nativeDocumentSource } from './document.ts';
 import type { HostReader, ZoteroHost } from './host-types.ts';
 import { locateQuoteOnPage, type LocatePage, type LocatedPosition } from './locate.ts';
@@ -35,6 +36,16 @@ export async function openSourcePage(
   if (!position) { await navigator.navigate(pageIndex, null); return 'unlocated'; }
   await navigator.navigate(pageIndex, position);
   return 'highlighted';
+}
+
+/** Navigate to a user-selected Figure rectangle after validating its frozen PDF revision. */
+export async function openFigureSelection(navigator: SourcePageNavigator, selection: NativeFigureSelection): Promise<void> {
+  const rect = selection.rect;
+  if (!Number.isSafeInteger(selection.pageIndex) || selection.pageIndex < 0 || !Array.isArray(rect) || rect.length !== 4
+    || !rect.every(Number.isFinite) || rect[2] <= rect[0] || rect[3] <= rect[1])
+    throw new ReaderError('INVALID_REQUEST', 'The saved Figure position is invalid.');
+  await navigator.validate({ paper: selection.paper, revision: selection.revision });
+  await navigator.navigate(selection.pageIndex, { pageIndex: selection.pageIndex, rects: [[...rect]] });
 }
 
 function sameRevision(expected: DocumentRevision, actual: DocumentRevision): boolean {

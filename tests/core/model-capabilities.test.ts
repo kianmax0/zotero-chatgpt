@@ -8,7 +8,7 @@ import { defaultSettings } from '../../packages/core/src/workspace/skills.ts';
 import type { Message } from '../../packages/contracts/src/index.ts';
 
 it('uses the exact pinned model default window rather than its optional maximum', () => {
-  expect(getPinnedModelCapabilities('gpt-5.4')).toMatchObject({ contextWindow: 272000, maxContextWindow: 1000000, inputModalities: ['text', 'image'], provenance: 'pinned-catalog', runtimeVersion: '0.154.0' });
+  expect(getPinnedModelCapabilities('gpt-5.4')).toMatchObject({ contextWindow: 272000, maxContextWindow: 1000000, inputModalities: ['text', 'image'], provenance: 'pinned-catalog', runtimeVersion: '0.156.1' });
   expect(getPinnedModelCapabilities('gpt-5.6-sol')).toMatchObject({ contextWindow: 272000, maxContextWindow: 872000 });
 });
 
@@ -21,6 +21,8 @@ it('keeps the pinned catalog identity welded to the manifest binary identity', (
 it('resolves every embedded catalog id so a manifest bump cannot silently empty the model picker', () => {
   const expected: Record<string, [contextWindow: number, maxContextWindow: number]> = {
     'gpt-6-astra': [272000, 872000],
+    'gpt-6-sol': [272000, 872000],
+    'gpt-6-luna': [272000, 872000],
     'gpt-5.6-sol': [272000, 872000],
     'gpt-5.6-terra': [272000, 872000],
     'gpt-5.6-luna': [272000, 872000],

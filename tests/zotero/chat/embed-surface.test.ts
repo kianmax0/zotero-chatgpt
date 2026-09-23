@@ -190,8 +190,8 @@ it('prepares one frozen context only for the bound official-page submission', as
   const browser = doc.querySelector(`[${CHAT_EMBED_ATTR}]`) as unknown as HTMLElement & { currentURI: { spec: string } };
   browser.currentURI = { spec: CHAT_APP_URL };
   surface.bindContext('paper-a:revision-1', question => Promise.resolve({
-    status: 'ready', document: 'Paper: A\n\n[page 1]\nfrozen body', selection: 'frozen selection',
-    coverage: { pages: 1, totalPages: 3, truncated: false }, question,
+    status: 'ready', paperContext: 'Title: A\n\nAbstract:\nfrozen abstract', selection: 'frozen selection',
+    coverage: { kind: 'bibliography' }, question,
   }));
   let response: unknown;
   const Event = (doc.defaultView as unknown as { CustomEvent: typeof CustomEvent }).CustomEvent;
@@ -200,7 +200,8 @@ it('prepares one frozen context only for the bound official-page submission', as
   }));
   await new Promise(resolve => setTimeout(resolve, 0));
   expect(response).toMatchObject({ status: 'prepared' });
-  expect((response as { text: string }).text).toContain('frozen body');
+  expect((response as { text: string }).text).toContain('frozen abstract');
+  expect((response as { text: string }).text).not.toContain('[page');
   expect((response as { text: string }).text).toContain('frozen selection');
   expect((response as { text: string }).text).toContain('Why?');
   surface.destroy();
@@ -211,15 +212,15 @@ it('invalidates an awaited PDF snapshot when the bound reader changes', async ()
   const surface = createChatEmbedSurface(win);
   const browser = doc.querySelector(`[${CHAT_EMBED_ATTR}]`) as unknown as HTMLElement & { currentURI: { spec: string } };
   browser.currentURI = { spec: CHAT_APP_URL };
-  let finish!: (value: { status: 'ready'; document: string; selection: null; coverage: { pages: number; totalPages: number; truncated: false } }) => void;
+  let finish!: (value: { status: 'ready'; paperContext: string; selection: null; coverage: { kind: 'bibliography' } }) => void;
   surface.bindContext('paper-a:revision-1', () => new Promise(resolve => { finish = resolve; }));
   let response: unknown;
   const Event = (doc.defaultView as unknown as { CustomEvent: typeof CustomEvent }).CustomEvent;
   browser.dispatchEvent(new Event(OFFICIAL_CHAT_BRIDGE_EVENT, {
     detail: { kind: 'prepare', binding: browser.getAttribute('data-zchatgpt-embed-binding'), transaction: 'transaction-b', question: 'Question A', respond: (value: unknown) => { response = value; } },
   }));
-  surface.bindContext('paper-b:revision-1', () => Promise.resolve({ status: 'ready', document: 'Paper B', selection: null, coverage: { pages: 1, totalPages: 1, truncated: false } }));
-  finish({ status: 'ready', document: 'Paper A', selection: null, coverage: { pages: 1, totalPages: 1, truncated: false } });
+  surface.bindContext('paper-b:revision-1', () => Promise.resolve({ status: 'ready', paperContext: 'Title: Paper B', selection: null, coverage: { kind: 'bibliography' } }));
+  finish({ status: 'ready', paperContext: 'Title: Paper A', selection: null, coverage: { kind: 'bibliography' } });
   await new Promise(resolve => setTimeout(resolve, 0));
   expect(response).toMatchObject({ status: 'blocked', reason: 'context-changed' });
   surface.destroy();
@@ -269,7 +270,7 @@ it('ignores a late accepted marker after the reader binding changes', async () =
   const surface = createChatEmbedSurface(win);
   const browser = doc.querySelector(`[${CHAT_EMBED_ATTR}]`) as unknown as HTMLElement & { currentURI: { spec: string } };
   browser.currentURI = { spec: CHAT_APP_URL };
-  surface.bindContext('paper-a', () => Promise.resolve({ status: 'ready', document: 'A', selection: null, coverage: { pages: 1, totalPages: 1, truncated: false } }));
+  surface.bindContext('paper-a', () => Promise.resolve({ status: 'ready', paperContext: 'Title: A', selection: null, coverage: { kind: 'bibliography' } }));
   let prepared: { marker: string } | null = null;
   const Event = (doc.defaultView as unknown as { CustomEvent: typeof CustomEvent }).CustomEvent;
   browser.dispatchEvent(new Event(OFFICIAL_CHAT_BRIDGE_EVENT, {
@@ -277,7 +278,7 @@ it('ignores a late accepted marker after the reader binding changes', async () =
   }));
   await new Promise(resolve => setTimeout(resolve, 0));
   const marker = prepared!.marker;
-  surface.bindContext('paper-b', () => Promise.resolve({ status: 'ready', document: 'B', selection: null, coverage: { pages: 1, totalPages: 1, truncated: false } }));
+  surface.bindContext('paper-b', () => Promise.resolve({ status: 'ready', paperContext: 'Title: B', selection: null, coverage: { kind: 'bibliography' } }));
   browser.dispatchEvent(new Event(OFFICIAL_CHAT_BRIDGE_EVENT, {
     detail: { kind: 'status', binding: browser.getAttribute('data-zchatgpt-embed-binding'), status: 'accepted', marker },
   }));
@@ -343,9 +344,9 @@ it('blocks composer preparation and parent submission while a saved conversation
   const { win, doc } = chromeWindow();
   const provider = vi.fn(() => Promise.resolve({
     status: 'ready' as const,
-    document: 'must not be frozen on the old page',
+    paperContext: 'must not be frozen on the old page',
     selection: null,
-    coverage: { pages: 1, totalPages: 1, truncated: false },
+    coverage: { kind: 'bibliography' as const },
   }));
   const sendQuery = vi.fn((name: string) => Promise.resolve(name === 'probe' ? { status: 'draft' } : { status: 'accepted' }));
   const surface = createChatEmbedSurface(win);

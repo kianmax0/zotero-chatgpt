@@ -66,13 +66,13 @@ async function select(argv: string[]): Promise<{ stage: string; driver: string |
   return JSON.parse(stdout) as { stage: string; driver: string | null; installDriver: boolean };
 }
 
-async function selectTree(argv: string[], root = repositoryRoot): Promise<{ stage: string; profile: string; dataDir: string; reportPath: string; pdfPath: string; cleanRuntimeTree?: boolean; exclusiveRoot?: string }> {
+async function selectTree(argv: string[], root = repositoryRoot): Promise<{ stage: string; profile: string; dataDir: string; reportPath: string; pdfPath: string; cleanRuntimeTree?: boolean; exclusiveRoot?: string; reuseExisting?: boolean; supplementPdfPath?: string }> {
   const { stdout } = await execFileAsync(process.execPath, [
     '--input-type=module',
     '-e',
     `import { selectHostTree } from ${JSON.stringify(stageModule)}; console.log(JSON.stringify(selectHostTree(${JSON.stringify(argv)}, ${JSON.stringify(root)})));`,
   ], { cwd: repositoryRoot });
-  return JSON.parse(stdout) as { stage: string; profile: string; dataDir: string; reportPath: string; pdfPath: string; cleanRuntimeTree?: boolean; exclusiveRoot?: string };
+  return JSON.parse(stdout) as { stage: string; profile: string; dataDir: string; reportPath: string; pdfPath: string; cleanRuntimeTree?: boolean; exclusiveRoot?: string; reuseExisting?: boolean; supplementPdfPath?: string };
 }
 
 function failureMessage(error: unknown): string {
@@ -202,6 +202,38 @@ describe('dedicated host-test stage selection', () => {
     await expect(select(['--context', '--live-core-flows'])).rejects.toThrow(/requires --context --live/u);
     await expect(select(['--context', '--live', '--login-wait-seconds', '30'])).rejects.toThrow(/requires --live-core-flows/u);
     await expect(select(['--context', '--live', '--live-core-flows', '--login-wait-seconds', '3601'])).rejects.toThrow(/between 0 and 3600/u);
+  });
+
+  it('stages live core checks in an existing named test profile without touching its saved account or preferences', async () => {
+    const args = ['--context', '--live', '--live-core-flows', '--reuse-run-id', 'signed-test', '--report-id', 'sol-check'];
+    await expect(select(args)).resolves.toMatchObject({ stage: 'context', installDriver: true });
+    const tree = await selectTree(args);
+    expect(tree.reuseExisting).toBe(true);
+    expect(tree.reportPath).toMatch(/signed-test\/host-live-sol-check\.json$/u);
+    await expect(select(['--context', '--live', '--reuse-run-id', 'signed-test', '--report-id', 'sol-check'])).rejects.toThrow(/requires --live-core or --context --live --live-core-flows/u);
+    const focused = await selectTree(['--live-core', '--reuse-run-id', 'signed-test', '--report-id', 'focused-sol']);
+    expect(focused).toMatchObject({ reuseExisting: true, profile: tree.profile, reportPath: path.join(repositoryRoot, '.zotero-chatgpt-dev/context-runs/signed-test/host-live-focused-sol.json') });
+    await expect(select([...args, '--run-id', 'other'])).rejects.toThrow();
+    await expect(select(['--context', '--live', '--live-core-flows', '--report-id', 'sol-check'])).rejects.toThrow(/requires --reuse-run-id/u);
+    const sandbox = await prepareScriptSandbox();
+    const profile = path.join(sandbox.root, '.zotero-chatgpt-dev/context-runs/signed-test/profile');
+    const data = path.join(sandbox.root, '.zotero-chatgpt-dev/context-runs/signed-test/data');
+    const installed = path.join(profile, 'extensions/{90909501-7b5b-4985-9f55-566e9890746c}.xpi');
+    const preference = path.join(profile, 'user.js');
+    const account = path.join(profile, 'zotero-chatgpt/v1/account/sentinel.bin');
+    try {
+      await Promise.all([mkdir(path.dirname(installed), { recursive: true }), mkdir(data, { recursive: true }), mkdir(path.dirname(account), { recursive: true })]);
+      await Promise.all([cp(sandbox.xpi, installed), writeFile(preference, 'existing preferences'), writeFile(account, 'unchanged synthetic sentinel')]);
+      await execFileAsync(process.execPath, [sandbox.script, ...args, sandbox.xpi], { cwd: sandbox.root });
+      expect(await readFile(preference, 'utf8')).toBe('existing preferences');
+      expect(await readFile(account, 'utf8')).toBe('unchanged synthetic sentinel');
+      expect(await readFile(installed, 'utf8')).toBe('synthetic test artifact');
+      const driverXpi = path.join(profile, 'extensions/zchatgpt-host-test@local.xpi');
+      const bootstrap = await readArchiveEntry(driverXpi, 'bootstrap.js');
+      expect(bootstrap).toContain('"liveCoreFlows":true');
+      expect(bootstrap).toContain('host-live-sol-check.json');
+      expect(bootstrap).toContain('live-reading-sol-check.pdf');
+    } finally { await rm(sandbox.root, { recursive: true, force: true }); }
   });
 
   it('selects a minimal live-core rerun on the preserved context tree', async () => {

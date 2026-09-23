@@ -22,8 +22,8 @@ function modelOf(models: readonly ModelOption[], id: string): ModelOption | unde
  * (`offeredModelIds`); this function only maps the resulting ids back onto the catalog entries the
  * UI needs to render, so the composer cannot drift from the policy the Preferences pane enforces.
  *
- * `allowedIds` is the Preferences allowlist from `enforcedAllowedModelIds`. `undefined` keeps the
- * historical family rule exactly as it was.
+ * `allowedIds` is the Preferences allowlist from `enforcedAllowedModelIds`. `undefined` means the
+ * current default set is selected, including for a persisted legacy default.
  */
 export function offeredModels(models: readonly ModelOption[], allowedIds?: readonly string[]): ModelOption[] {
   const byId = new Map(models.map(model => [model.id, model] as const));
@@ -31,9 +31,8 @@ export function offeredModels(models: readonly ModelOption[], allowedIds?: reado
 }
 
 /**
- * The newest model the picker can offer. The catalog's `isDefault` flag describes the CLI's own
- * start-up preference and can lag behind, so it is never the default here, and `gpt-6-astra` is
- * first regardless of the order the runtime pages the catalog in.
+ * The preferred current model the picker can offer. The catalog's `isDefault` flag describes the
+ * CLI's own start-up preference and can lag behind, so the product rank determines this default.
  */
 function defaultModel(models: readonly ModelOption[], allowedIds?: readonly string[]): ModelOption | undefined {
   return offeredModels(models, allowedIds)[0];

@@ -7,16 +7,18 @@ function documentOf(): Document {
   return new Window({ url: 'https://zchatgpt.test/' }).document as unknown as Document;
 }
 
-it('places a pressed toggle immediately before Find and never invents a second button', () => {
+it('places a pressed toggle immediately after Find and never invents a second button', () => {
   const doc = documentOf();
   const find = doc.createElement('button');
   find.className = 'find';
   const host = doc.createElement('div');
+  host.className = 'toolbar';
   host.append(find);
   doc.body.append(host);
   const button = createToolbarButton(doc, () => undefined);
   insertToolbarButton({ doc, append: (...nodes) => { find.before(...nodes); } }, button);
-  expect(host.firstElementChild).toBe(button);
+  expect(button.previousElementSibling).toBe(find);
+  expect(host.lastElementChild).toBe(button);
   expect(doc.querySelectorAll('[data-zchatgpt-toggle]')).toHaveLength(1);
   expect(button.getAttribute('aria-pressed')).toBe('false');
   updateToolbarButton(button, true);
@@ -42,7 +44,7 @@ it('hosts only a Codex sidebar toggle and never New chat, history, or a paper ti
   expect(host.querySelector('[data-zchatgpt-context-title]')).toBeNull();
   expect(host.querySelector('.zchatgpt-chrome')).toBeNull();
   expect(host.children).toHaveLength(2);
-  expect([...host.children]).toEqual([button, find]);
+  expect([...host.children]).toEqual([find, button]);
 });
 
 it('does not measure or impersonate the native reader toolbar height', () => {

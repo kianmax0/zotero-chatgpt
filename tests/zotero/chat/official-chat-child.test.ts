@@ -98,7 +98,7 @@ describe('official ChatGPT child send transaction', () => {
     const first = actor.submitQuestion('question');
     await expect(actor.submitQuestion('question')).resolves.toEqual({ status: 'blocked', reason: 'busy' });
     acceptedOnClick(current, 'marker-1');
-    finish({ status: 'prepared', text: 'frozen [Zotero request marker-1]', marker: 'marker-1' });
+    finish({ status: 'prepared', hasAutomaticContext: true, text: 'frozen [Zotero request marker-1]', marker: 'marker-1' });
     await expect(first).resolves.toMatchObject({ status: 'accepted' });
     expect(sendQuery).toHaveBeenCalledTimes(1);
   });
@@ -109,14 +109,14 @@ describe('official ChatGPT child send transaction', () => {
     actor.sendQuery = () => new Promise(resolve => { finish = resolve; });
     const submission = actor.submitQuestion('question');
     current.composer.textContent = 'question plus a new thought';
-    finish({ status: 'prepared', text: 'stale frozen prompt', marker: 'marker-2' });
+    finish({ status: 'prepared', hasAutomaticContext: true, text: 'stale frozen prompt', marker: 'marker-2' });
     await expect(submission).resolves.toEqual({ status: 'blocked', reason: 'draft-changed' });
     expect(current.composer.textContent).toBe('question plus a new thought');
   });
 
   it('refuses an explicit More-details submission when the official composer already has another draft', async () => {
     const current = page(); const actor = actorFor(current); current.composer.textContent = 'my unrelated unsent draft';
-    const prepare = vi.fn(() => Promise.resolve({ status: 'prepared', text: 'should never replace', marker: 'marker-explicit' }));
+    const prepare = vi.fn(() => Promise.resolve({ status: 'prepared', hasAutomaticContext: true, text: 'should never replace', marker: 'marker-explicit' }));
     actor.sendQuery = prepare;
     await expect(actor.submitQuestion('Explain the selected passage.')).resolves.toEqual({ status: 'blocked', reason: 'draft-changed' });
     expect(prepare).not.toHaveBeenCalled();
@@ -129,7 +129,7 @@ describe('official ChatGPT child send transaction', () => {
     actor.sendQuery = () => new Promise(resolve => { finish = resolve; });
     const submission = actor.submitQuestion('question');
     const navigated = page(); actor.document = navigated.doc; actor.contentWindow = navigated.window;
-    finish({ status: 'prepared', text: 'stale frozen prompt', marker: 'marker-3' });
+    finish({ status: 'prepared', hasAutomaticContext: true, text: 'stale frozen prompt', marker: 'marker-3' });
     await expect(submission).resolves.toEqual({ status: 'blocked', reason: 'context-changed' });
     expect(navigated.composer.textContent).toBe('');
   });
@@ -143,10 +143,24 @@ describe('official ChatGPT child send transaction', () => {
     expect(status).toHaveBeenCalledWith('status', { status: 'accepted-without-context', marker: 'marker-off' });
   });
 
+  it('reports selection-only sends without claiming automatic paper context', async () => {
+    const current = page(); const actor = actorFor(current); current.composer.textContent = 'question';
+    const status = vi.fn(); actor.sendAsyncMessage = (name, data) => { status(name, data); };
+    actor.sendQuery = () => Promise.resolve({
+      status: 'prepared', hasAutomaticContext: false,
+      text: 'question\n\nExplicit selected text from Zotero:\nselected passage [Zotero request marker-selection]',
+      marker: 'marker-selection',
+    });
+    acceptedOnClick(current, 'marker-selection');
+    await expect(actor.submitQuestion('question')).resolves.toMatchObject({ status: 'accepted' });
+    expect(current.composer.textContent).toContain('selected passage');
+    expect(status).toHaveBeenCalledWith('status', { status: 'accepted-without-context', marker: 'marker-selection' });
+  });
+
   it('waits for the official form send button to render after a controlled-textarea update', async () => {
     const current = page(); const actor = actorFor(current); current.composer.textContent = 'question';
     current.send.remove();
-    actor.sendQuery = () => Promise.resolve({ status: 'prepared', text: 'frozen [Zotero request marker-late]', marker: 'marker-late' });
+    actor.sendQuery = () => Promise.resolve({ status: 'prepared', hasAutomaticContext: true, text: 'frozen [Zotero request marker-late]', marker: 'marker-late' });
     const submission = actor.submitQuestion('question');
     const late = current.composer.ownerDocument.createElement('button'); late.dataset.testid = 'send-button';
     late.addEventListener('click', () => {
@@ -159,7 +173,7 @@ describe('official ChatGPT child send transaction', () => {
   it('uses the observed unique mobile form submit button without broadening to unsafe forms', async () => {
     const current = mobilePage(); const actor = actorFor(current); current.composer.value = 'question';
     await expect(actor.receiveMessage({ name: 'probe' })).resolves.toMatchObject({ status: 'draft' });
-    actor.sendQuery = () => Promise.resolve({ status: 'prepared', text: 'mobile frozen [Zotero request marker-mobile]', marker: 'marker-mobile' });
+    actor.sendQuery = () => Promise.resolve({ status: 'prepared', hasAutomaticContext: true, text: 'mobile frozen [Zotero request marker-mobile]', marker: 'marker-mobile' });
     acceptedOnClick(current, 'marker-mobile');
     await expect(actor.submitQuestion('question')).resolves.toMatchObject({ status: 'accepted' });
 
@@ -171,7 +185,7 @@ describe('official ChatGPT child send transaction', () => {
 
   it('retries the identical submission once when the official send control ignores the first click', async () => {
     const current = page(); const actor = actorFor(current); current.composer.textContent = 'question';
-    actor.sendQuery = () => Promise.resolve({ status: 'prepared', text: 'frozen [Zotero request marker-retry]', marker: 'marker-retry' });
+    actor.sendQuery = () => Promise.resolve({ status: 'prepared', hasAutomaticContext: true, text: 'frozen [Zotero request marker-retry]', marker: 'marker-retry' });
     let clicks = 0;
     current.send.addEventListener('click', () => {
       clicks += 1;
@@ -189,7 +203,7 @@ describe('official ChatGPT child send transaction', () => {
 
   it('never sends a second time when the page consumed the first click', async () => {
     const current = page(); const actor = actorFor(current); current.composer.textContent = 'question';
-    actor.sendQuery = () => Promise.resolve({ status: 'prepared', text: 'frozen [Zotero request marker-consumed]', marker: 'marker-consumed' });
+    actor.sendQuery = () => Promise.resolve({ status: 'prepared', hasAutomaticContext: true, text: 'frozen [Zotero request marker-consumed]', marker: 'marker-consumed' });
     let clicks = 0;
     current.send.addEventListener('click', () => {
       clicks += 1;
@@ -208,7 +222,7 @@ describe('official ChatGPT child send transaction', () => {
 
   it('accepts the page re-rendering the inserted rich text before the send control appears', async () => {
     const current = page(); const actor = actorFor(current); current.composer.textContent = 'question';
-    actor.sendQuery = () => Promise.resolve({ status: 'prepared', text: 'frozen\n\nwith\n\n\nbreaks [Zotero request marker-normalized]', marker: 'marker-normalized' });
+    actor.sendQuery = () => Promise.resolve({ status: 'prepared', hasAutomaticContext: true, text: 'frozen\n\nwith\n\n\nbreaks [Zotero request marker-normalized]', marker: 'marker-normalized' });
     current.send.remove();
     // The real rich-text editor re-renders from its own state after insertText and collapses the
     // blank lines. That is the page's own formatting, not an owner edit.
@@ -227,7 +241,7 @@ describe('official ChatGPT child send transaction', () => {
 
   it('still refuses to send when the page replaced the frozen text with real different words', async () => {
     const current = page(); const actor = actorFor(current); current.composer.textContent = 'question';
-    actor.sendQuery = () => Promise.resolve({ status: 'prepared', text: 'frozen [Zotero request marker-edited]', marker: 'marker-edited' });
+    actor.sendQuery = () => Promise.resolve({ status: 'prepared', hasAutomaticContext: true, text: 'frozen [Zotero request marker-edited]', marker: 'marker-edited' });
     current.send.remove();
     current.window.setTimeout(() => {
       current.composer.textContent = 'the owner typed something else entirely';

@@ -23,7 +23,7 @@ async function hashInput(input: SendInput, version: 1 | 2 | 3 = 1): Promise<stri
 }
 async function setup(configure?: (s: ReturnType<typeof server>) => void, storage = new MemoryStorage()) {
   const s = server(); configure?.(s);
-  const c = await createReaderClient(s.p, storage, { codexVersion: '0.154.0', cwd: '/isolated', uuid, loginTimeoutMs: 1000, deltaFlushMs: 1, now: () => '2026-09-09T08:00:00.000Z' }); clients.push(c);
+  const c = await createReaderClient(s.p, storage, { codexVersion: '0.156.1', cwd: '/isolated', uuid, loginTimeoutMs: 1000, deltaFlushMs: 1, now: () => '2026-09-09T08:00:00.000Z' }); clients.push(c);
   const events: ReaderEvent[] = []; c.subscribe(e => events.push(e));
   return { ...s, storage, c, events };
 }

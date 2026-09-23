@@ -12,7 +12,7 @@ function fixture() {
     respond: vi.fn(() => Promise.resolve()), rejectRequest: vi.fn(() => Promise.resolve()),
     subscribe: () => () => undefined, onFailure: listener => { failed = listener; return () => { failed = null; }; }, close: vi.fn(() => Promise.resolve()),
   };
-  const prepared = { spec: { executable: '/private/codex', args: ['app-server'], cwd: '/private/scratch', env: { CODEX_HOME: '/private/account' } as Record<string, string> }, codexVersion: '0.154.0' };
+  const prepared = { spec: { executable: '/private/codex', args: ['app-server'], cwd: '/private/scratch', env: { CODEX_HOME: '/private/account' } as Record<string, string> }, codexVersion: '0.156.1' };
   const dependencies: AgentRuntimeDependencies = { prepare: vi.fn(() => Promise.resolve(prepared)), process: { spawn: vi.fn(() => Promise.resolve(process)) }, connect: vi.fn(() => Promise.resolve(connection)) };
   return { dependencies, process, connection, prepared, fail: () => failed?.() };
 }
@@ -37,7 +37,7 @@ it('shares one startup and reuses the live channel', async () => {
 });
 it('passes the prepared runtime to the handshake', async () => {
   const f = fixture(); const runtime = new AgentRuntime(f.dependencies); await runtime.connection();
-  expect(f.dependencies.connect).toHaveBeenCalledWith(f.process, expect.objectContaining({ codexVersion: '0.154.0', cwd: '/private/scratch' }));
+  expect(f.dependencies.connect).toHaveBeenCalledWith(f.process, expect.objectContaining({ codexVersion: '0.156.1', cwd: '/private/scratch' }));
   await runtime.stop();
 });
 it('stop during extraction prevents any spawn and further start', async () => {

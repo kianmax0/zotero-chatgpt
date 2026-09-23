@@ -83,6 +83,8 @@ conversation 文件应由一个持久化所有者串行写入；历史查询和 
 
 Chat surface 负责官方 browser 生命周期与受限 actor。Agent surface 负责原生 transcript、composer、模型选择和任务卡片。两者显示互斥；切换不迁移、重放或重新分类在途请求。
 
+文献库主窗口有对话式 Agent 工作区，不依赖 Reader 或 PDF。入口位于条目搜索框旁，使用与 Reader 相同的对话气泡符号；工作区挂在 `#zotero-items-pane` 中，从工具栏下方与条目列表并排，同时保留 Zotero 原生条目详情栏和侧边按钮。窄窗改为在列表下方堆叠，分隔条按当前方向调节宽度或高度；不改变原生 pane 的隐藏状态或持久化宽度。进入 Reader 标签时主窗口工作区收起，不抢 Reader 焦点。两处共用 Reader `sidebar.css` 的模式开关、消息、起步卡、输入和任务卡片样式。主窗口头部的历史只导航本地 library Agent 消息，PDF 按钮只打开恰好选中条目的唯一 PDF；自动上下文图标只控制主窗口 Chat 的书目与摘要附带，直接读写一个插件 pref。工作区用独立的本地 library session、Codex thread 和消息记录承载主题发现、获取、整理、元数据、笔记及集合创建，并复用 `ActionTaskController` 审批与账本；不能为满足 Reader 会话的必填 `PaperScope` 伪造附件。`/skill` 仅选择受限能力，`@` 将本窗口选中条目或显式选择的文库、集合、文章冻结为有界只读上下文；原生 key 留在宿主。主窗口 Chat 则把单篇选中文献的书目和摘要送往官方网页，绝不通过 Agent thread。
+
 官方 browser 暂时不可见时按既有设计保留页面，而不是销毁会话；隐藏状态不能获得焦点或捕获其它模式输入。长期生命周期和关闭恢复由宿主明确管理，不依赖每次 view render 重建页面。
 
 保存 Agent 草稿与视图状态可使用现有 presenter/workspace。官方网页草稿由官方页面拥有，插件不能为“统一草稿”新增全文 transcript 抓取；受限发送过程所需的 composer 内容处理仅限该次可见用户动作。
@@ -105,7 +107,7 @@ Chat surface 负责官方 browser 生命周期与受限 actor。Agent surface �
 
 既有链路是：官方 composer 的可见发送意图 → 父进程校验并冻结文献/选区/问题 → 生成覆盖说明与随机 marker → actor 写回同一个可见 composer → 触发该次官方提交 → 检查有限接受信号。
 
-动作边界前后均复核自动 PDF 开关、attachment/revision、页面和会话绑定。`More details` 与 `Ask in sidechat` 走同一网页入口，不触达 Agent presenter 的模型发送路径；后者只准备内容，不代用户发送。
+动作边界前后均复核自动上下文开关、attachment/revision、页面和会话绑定。Chat 默认只准备冻结条目的书目信息与摘要，不顺序截取 PDF 页面；显式选区作为独立原文输入。首次说明服务和字段，但不要求侧栏确认才能发送。`More details` 与 `Ask in sidechat` 走同一网页入口，不触达 Agent presenter 的模型发送路径；后者只准备内容，不代用户发送。
 
 必须保留与原问题和选区对应的冻结来源，不能在异步回调中重新读取“当前 PDF”替换已经接受的请求。页面或草稿不再匹配时安全失败，不能套用旧 marker 到新对话。
 
@@ -145,6 +147,8 @@ requestId 与冻结输入 hash 共同去重；相同 ID 对应不同内容必须
 
 模型不得获得 shell、任意文件、MCP、通用插件、浏览器或不受限 Zotero 工具。任务输出经过受限 schema 校验；上游未授权工具活动或不符合策略的审批请求必须拒绝并关闭受影响连接。
 
+文献库 Agent 使用独立的持久 thread/turn；消息、冻结输入与原始 JSON 结果存于插件私有记录。输入只含模型可见的有界元数据、摘要、标签和集合序号；native key 留在本地。`thread/start` 前保存请求 ID，随后保存 thread/turn ID；超时或结果不明时按身份读回/恢复，不新开模型轮次。结构化结果先经严格 schema 和索引验证，再由任务控制器生成候选。OpenAlex 主题发现是固定来源的只读搜索；Zotero translator 元数据预览、查重和 OA PDF 下载仍由宿主受控端口负责。
+
 ### 5.3 任务批准、停止和结果
 
 Agent 模式本身不构成写入批准。一个任务可集中预览、选择和批准，不逐个弹窗打断用户。审批、写前 intent、native write、readback 和 ledger 均保留。
@@ -157,7 +161,7 @@ Agent 模式本身不构成写入批准。一个任务可集中预览、选择�
 
 ReaderContext 沿用适配层聚合：组合既有身份、DocumentContext 和缓存，不复制第二份文档事实、不重复计算 revision/hash。实时页码、滚动、zoom 和 dock 宽度属于各视图的阅读状态，需要时捕获，不为“共享上下文”建立第二个持续同步的状态所有者。
 
-文档本地提取与外发分开。Chat 与 Agent 共用来源，但可有不同输入预算；本次范围由实际发送快照决定。既有 core 预算/规划逻辑是预算与覆盖说明的所有者，UI 只展示结果，不在 presenter 或 view 复制另一套估算与截断规则。原始 text brief 上限、平台 pin 等可能变化的实现参数以代码及 progress 中记录的版本为准，不在 UI 中硬写“全文已读”。
+文档本地提取与外发分开。Chat 的默认外发范围是本地书目信息与摘要，不将本地已提取的页数冒充发送范围；显式选区单独冻结。Agent 阅读和高亮仍可使用冻结的 PDF 原文与 core 的预算/规划逻辑。本次范围由实际发送快照决定，UI 只展示结果，不在 presenter 或 view 复制另一套估算与截断规则。平台 pin 等可变参数以代码及 progress 中记录的版本为准，不在 UI 中硬写“全文已读”。
 
 同一父条目下多个 PDF 仍是不同 attachment；不同窗口、profile、library 与附件的异步结果不可串用。请求面显示冻结来源，共同摘要显示下一次来源，两者不能覆盖彼此。
 
@@ -169,7 +173,9 @@ ReaderContext 沿用适配层聚合：组合既有身份、DocumentContext 和�
 
 使用冻结 PDF 的原生字符盒生成行矩形，跨页只允许相邻两页。候选重复、仍由历史任务拥有的输出或写入结果不明时，不能分配第二个写 key；只有确认原输出已撤销、对应所有权解除后才允许重新创建。
 
-批准前只保存 review；批准后先保存 reserved key 与 `annotation-create` writing 意图，再调用 `Annotations.saveFromJSON`，最后按 key 读回完整原生快照。写前再次验证 quote 与 revision，不信任账本中的旧坐标。writing/unknown 恢复先 inspect，不重发。
+新发送的 Agent annotate 请求在冻结 workflow 中标明自动执行意图，并随模型请求持久化；只有此标记存在时，返回候选才创建带同一意图的任务。冻结 quote 经唯一匹配与几何验证后，只把已解析且未重复的候选交给原有写入控制器；不再等待第二次人工批准。旧请求和旧任务没有该意图，保持原有 review 状态，不在升级或恢复时静默写入。写入前先保存 reserved key 与 `annotation-create` writing 意图，再调用 `Annotations.saveFromJSON`，最后按 key 读回完整原生快照。写前再次验证 quote 与 revision，不信任账本中的旧坐标。writing/unknown 恢复先 inspect，不重发。
+
+注释正文只含插件 provenance 与经清理的简短理由；模型返回的内部来源链接、页码定位和验证状态留在任务/来源数据中，不嵌入 Zotero annotation comment。历史任务已保存的 comment 仍按其原始字节核对，以免破坏读回与撤销。
 
 原文跳转将第一页 rects 与相邻第二页 `nextPageRects` 一次交给 Reader.navigate，不修改缩放或旋转。撤销要求标注仍精确匹配写后快照并带本插件 provenance，否则 conflict。
 
@@ -183,7 +189,7 @@ ReaderContext 沿用适配层聚合：组合既有身份、DocumentContext 和�
 
 账本保存 before/after、实际 addedTags 与 addedCollectionKeys。撤销先验证 delta 语义，再要求当前精确等于 after，仅移除实际新增项。人工后改、部分人工删除、缺失写后快照或所有权不明，分别保留数据并标为 conflict/uncertain。
 
-整理仅使用已有可编辑集合，不扩大为创建/重命名/删除集合、删除标签、移动或删除条目、改元数据和处理附件。
+整理仍只添加标签和已有集合关系。创建集合、空字段元数据补全及子笔记是分开的受限任务，不把整理模型输出当作这些写入的许可；均沿用批准、写前 intent、原生读回及精确撤销。
 
 ### 7.3 acquire
 
@@ -195,7 +201,9 @@ OA 下载由受控宿主动作执行。逐跳校验公网 URL，拒绝私网/本
 
 ## 8. 设置、历史与兼容
 
-共用设置只控制插件共有行为。Agent 模型、instructions、skills 和生成设置不影响官网模型或官网个人设置。原始 model ID 必须与实际运行时能力一致；缓存、随包目录和已确认能力分开显示。
+共用设置只控制插件共有行为。Agent 模型、instructions、skills 和生成设置不影响官网模型或官网个人设置。新请求的模型选择只取运行时当前报告的 GPT-6 Sol、Astra、Luna，默认优先 Sol；已有记录的旧模型身份只读保留。原始 model ID 必须与实际运行时能力一致；缓存、随包目录和已确认能力分开显示。
+
+Preferences 保存 Agent 模型白名单后要刷新所有已打开的 Reader composer，使下一次请求立即采用新设置；已发送或正在运行的请求保持发送时冻结的模型。独立运行的文献库 Agent 也在每次新请求读取最新设置，不通过重启 Zotero 才生效。
 
 历史索引只索引本地确实拥有的字段。官方远端 transcript 仍由官网拥有，不为 UI 的“统一历史”要求新增采集。删除通过唯一存储所有者执行，先检查活动 request/task/reading job；会话删除不调用原生撤销，也不顺便清理账户目录。
 

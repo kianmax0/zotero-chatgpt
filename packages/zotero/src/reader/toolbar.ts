@@ -22,5 +22,7 @@ export function updateToolbarButton(button: HTMLButtonElement, active: boolean):
 }
 export function insertToolbarButton(event: Pick<ToolbarEvent, 'doc' | 'append'>, button: HTMLButtonElement): void {
   event.doc.querySelector('[data-zchatgpt-toggle]')?.remove();
-  event.append(button);
+  const search = event.doc.querySelector('.toolbar .find');
+  if (search?.parentElement) search.after(button);
+  else event.append(button);
 }

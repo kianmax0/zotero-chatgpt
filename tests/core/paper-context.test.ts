@@ -1,8 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import type { DocumentContext, PaperIdentity } from '../../packages/contracts/src/index.ts';
+import type { PaperIdentity } from '../../packages/contracts/src/index.ts';
 import { DOCUMENT_BRIEF_HEADER, documentBrief } from '../../packages/core/src/chat/document-brief.ts';
 import { cleanAbstract, hasBibliographicIdentity, normalizeDoi, paperContext, publicationOf } from '../../packages/core/src/chat/paper-context.ts';
-import { documentA } from '../contracts/document-fixture.ts';
 
 /** A marker that must never reach the manual copy: it exists only in the locally read PDF text. */
 const FULLTEXT_ONLY_SHOULD_NOT_COPY = 'FULLTEXT_ONLY_SHOULD_NOT_COPY';
@@ -16,11 +15,6 @@ const identity: PaperIdentity = {
   doi: '10.1000/synthetic',
   abstractNote: 'A stored abstract that is not the PDF body.',
 };
-
-function documentWith(pages: DocumentContext['pages'], totalPages = pages.length): DocumentContext {
-  return { ...documentA, totalPages, pages };
-}
-const pdfWithMarker = () => documentWith(documentA.pages.map(page => ({ ...page, text: `${page.text} ${FULLTEXT_ONLY_SHOULD_NOT_COPY}` })));
 
 describe('paperContext', () => {
   it('writes the fixed field order and omits a field the item does not carry', () => {
@@ -42,10 +36,10 @@ describe('paperContext', () => {
 
   it('never carries PDF text, a selection, a status line or an internal marker', () => {
     const context = paperContext(identity)!;
-    // The automatic send still carries the locally read body; the manual copy must not.
-    const brief = documentBrief(identity, pdfWithMarker());
-    expect(brief?.text).toContain(FULLTEXT_ONLY_SHOULD_NOT_COPY);
-    expect(brief?.text).toContain(DOCUMENT_BRIEF_HEADER);
+    // Both compact paper-context paths accept only frozen identity, never a PDF document.
+    const brief = documentBrief(identity);
+    expect(brief?.text).not.toContain(FULLTEXT_ONLY_SHOULD_NOT_COPY);
+    expect(brief?.text).not.toContain(DOCUMENT_BRIEF_HEADER);
     expect(context.text).not.toContain(FULLTEXT_ONLY_SHOULD_NOT_COPY);
     for (const forbidden of ['Context from the PDF', '[page i]', 'pages read locally', 'Current PDF', 'Locally read text', 'marker', 'shortened']) {
       expect(context.text).not.toContain(forbidden);

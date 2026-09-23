@@ -1,12 +1,19 @@
 import { clone } from '../../../contracts/src/clone.ts';
-import { type NativeAnnotationCandidate, type NativeAnnotationPosition, type NativeItemSnapshot, type NativeReaderPort } from '../../../contracts/src/native.ts';
+import { type NativeAnnotationCandidate, type NativeAnnotationPosition, type NativeFigureCalloutInput, type NativeFigureCalloutSnapshot, type NativeCollectionSnapshot, type NativeItemSnapshot, type NativeReaderPort } from '../../../contracts/src/native.ts';
 import type { Rect } from '../../../contracts/src/index.ts';
 import { lineRects, type LocateChar } from '../reader/locate.ts';
-import type { NativeZoteroHost } from '../host/native.ts';
-import { boundary, checkSignal, fail, key, normalizedText, publicURL, revisionMatches, string, waitRead, type NativeSupport } from './native-support.ts';
+import type { NativeHostCollection, NativeZoteroHost } from '../host/native.ts';
+import { boundary, canonical, checkSignal, equal, fail, key, normalizedText, publicURL, revisionMatches, string, waitRead, type NativeSupport } from './native-support.ts';
 
 const MAX_PAGES = 256;
 const MAX_TEXT = 2_000_000;
+
+export function nativeCollectionSnapshot(support: NativeSupport, collection: NativeHostCollection): NativeCollectionSnapshot {
+  const z = support.z;
+  const childItemKeys = collection.getChildItems(true, true).map(value => typeof value === 'number' ? z.Items.get(value) : value).filter(item => item !== false && item !== undefined).map(item => item.key).sort();
+  const childCollectionKeys = collection.getChildCollections(true, true).map(value => typeof value === 'number' ? z.Collections.get(value) : value).filter(item => item !== false && item !== undefined).map(item => item.key).sort();
+  return { clientId: support.clientId, libraryId: collection.libraryID, collectionKey: collection.key, name: collection.name, parentKey: typeof collection.parentKey === 'string' ? collection.parentKey : null, childItemKeys, childCollectionKeys, dateModified: collection.dateModified, contentSignature: canonical(collection.toJSON()) };
+}
 
 /**
  * Read-only native Zotero access: PDF quote resolution, annotation/item/attachment inspection and
@@ -22,6 +29,21 @@ export function createNativeReaderPort(support: NativeSupport): NativeReaderPort
       checkSignal(signal); support.paper(input.paper); key(input.key);
       const item = z.Items.getByLibraryAndKey(input.paper.libraryId, input.key); if (!item) return null;
       await item.loadAllData?.(); checkSignal(signal); return support.annotationSnapshot(input.paper, item);
+    }),
+    inspectFigureCallout: (value: NativeFigureCalloutInput, signal) => boundary(async () => {
+      checkSignal(signal); const plan = await support.prepareFigureCallout(value, signal); const parent = support.paper(plan.selection.paper);
+      const imageItem = z.Items.getByLibraryAndKey(parent.libraryID, plan.image.key);
+      const inkItem = z.Items.getByLibraryAndKey(parent.libraryID, plan.ink.key);
+      if (!imageItem && !inkItem) return { status: 'absent' } as const;
+      if (!imageItem || !inkItem) return { status: 'partial' } as const;
+      await imageItem.loadAllData?.(); await inkItem.loadAllData?.(); checkSignal(signal);
+      const image = await support.figureAnnotationSnapshot(plan.selection.paper, imageItem);
+      const ink = await support.figureAnnotationSnapshot(plan.selection.paper, inkItem);
+      if (!image || !ink) return { status: 'partial' } as const;
+      const nativeFields = <T extends { imageSHA256: string }>(snapshot: T): unknown => { const copy = clone(snapshot); Reflect.deleteProperty(copy, 'dateModified'); Reflect.deleteProperty(copy, 'imageSHA256'); return copy; };
+      if (!equal(nativeFields(image), nativeFields(plan.image)) || !equal(nativeFields(ink), nativeFields(plan.ink))) return { status: 'conflict' } as const;
+      const callout: NativeFigureCalloutSnapshot = { selection: plan.selection, image, ink };
+      return { status: 'complete', callout } as const;
     }),
     resolveQuote: (value, signal) => boundary(async () => {
       checkSignal(signal); const input = clone(value); support.paper(input.paper);
@@ -93,6 +115,22 @@ export function createNativeReaderPort(support: NativeSupport): NativeReaderPort
       return results;
     }),
     inspectItem: (input, signal) => boundary(async () => { checkSignal(signal); const item = support.getItem(input); if (!item) return null; await item.loadAllData?.(); checkSignal(signal); return support.itemSnapshot(item); }),
+    inspectCollection: (input, signal) => boundary(async () => {
+      checkSignal(signal); support.scope(input); key(input.collectionKey);
+      const collection = z.Collections.getByLibraryAndKey(input.libraryId, input.collectionKey);
+      if (!collection || collection.deleted || collection.libraryID !== input.libraryId) return null;
+      await collection.loadDataType('primaryData'); await collection.loadDataType('childItems'); await collection.loadDataType('childCollections'); checkSignal(signal);
+      return nativeCollectionSnapshot(support, collection);
+    }),
+    inspectChildNote: (input, signal) => boundary(async () => {
+      checkSignal(signal); support.scope(input); key(input.key); key(input.parentKey);
+      const note = z.Items.getByLibraryAndKey(input.libraryId, input.key);
+      if (!note || note.deleted || note.itemType !== 'note' || !note.parentID) return null;
+      await note.loadAllData?.(); checkSignal(signal);
+      const parent = z.Items.get(note.parentID);
+      if (!parent || parent.deleted || !parent.isRegularItem() || parent.libraryID !== input.libraryId || parent.key !== input.parentKey) return null;
+      return { clientId: support.clientId, libraryId: note.libraryID, key: note.key, parentKey: parent.key, body: note.getNote(), contentSignature: support.contentSignature(note) };
+    }),
     inspectOrganizationItem: (input, signal) => boundary(async () => { checkSignal(signal); const item = support.getItem(input); if (!item) return null; await item.loadAllData?.(); checkSignal(signal); return support.organizationItemSnapshot(item); }),
     previewMetadata: (value, signal) => boundary(async () => {
       checkSignal(signal); const identifier = string(value.identifier, 8192); if (!identifier) fail('INVALID_INPUT', 'Enter a DOI or a public article link.');

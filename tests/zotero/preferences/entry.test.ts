@@ -148,29 +148,34 @@ it('carries the model allowlist across the pane bridge and writes it as JSON', a
   const element = root();
   const writes: string[] = [];
   const writeSettings = bridge.writeSettings;
+  const readLiveModels = bridge.readLiveModels;
   bridge.writeSettings = json => { writes.push(json); };
+  bridge.readLiveModels = () => JSON.stringify(['gpt-6-sol', 'gpt-6-luna']);
   try {
     pane().mount(element);
-    await vi.waitFor(() => expect(element.querySelector('[data-zchatgpt-model-allowed="gpt-5.6-luna"]')).not.toBeNull());
-    const luna = element.querySelector<HTMLInputElement>('[data-zchatgpt-model-allowed="gpt-5.6-luna"]')!;
+    await vi.waitFor(() => expect(element.querySelector('[data-zchatgpt-model-allowed="gpt-6-luna"]')).not.toBeNull());
+    const luna = element.querySelector<HTMLInputElement>('[data-zchatgpt-model-allowed="gpt-6-luna"]')!;
     luna.checked = false;
     luna.dispatchEvent(new (element.ownerDocument.defaultView as unknown as { Event: typeof Event }).Event('change', { bubbles: true }));
     await vi.waitFor(() => expect(writes).toHaveLength(1));
     const parsed = JSON.parse(writes[0]!) as { allowedModels: Array<{ id: string }> };
-    expect(parsed.allowedModels.map(model => model.id)).toEqual(['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra']);
+    expect(parsed.allowedModels.map(model => model.id)).toEqual(['gpt-6-sol', 'gpt-6-astra']);
   } finally {
     bridge.writeSettings = writeSettings;
+    if (readLiveModels) bridge.readLiveModels = readLiveModels;
+    else delete bridge.readLiveModels;
     pane().unmount(element);
   }
 });
 
-it('carries the runtime live model list across the bridge so a Spark model becomes selectable', async () => {
+it('carries the runtime live model list across the bridge so Sol and Luna become selectable', async () => {
   const element = root();
-  bridge.readLiveModels = () => JSON.stringify(['gpt-6-astra', 'gpt-5.3-codex-spark', 'gpt-5.5']);
+  bridge.readLiveModels = () => JSON.stringify(['gpt-6-astra', 'gpt-6-sol', 'gpt-6-luna', 'gpt-5.5']);
   try {
     pane().mount(element);
-    await vi.waitFor(() => expect(element.querySelector('[data-zchatgpt-model-allowed="gpt-5.3-codex-spark"]')).not.toBeNull());
-    // Only the offerable family joins; the excluded GPT-5.5 the runtime also reported does not.
+    await vi.waitFor(() => expect(element.querySelector('[data-zchatgpt-model-allowed="gpt-6-sol"]')).not.toBeNull());
+    expect(element.querySelector('[data-zchatgpt-model-allowed="gpt-6-luna"]')).not.toBeNull();
+    // GPT-5.5 the runtime also reported does not become a picker option.
     expect(element.querySelector('[data-zchatgpt-model="gpt-5.5"]')).toBeNull();
     expect(element.querySelector('[data-zchatgpt-pref="models-note"]')?.textContent).toMatch(/running runtime's report/u);
   } finally {
@@ -179,10 +184,10 @@ it('carries the runtime live model list across the bridge so a Spark model becom
   }
 });
 
-it('mounts the bundled families with honest copy when the bridge has no live model port', async () => {
+it('mounts the bundled current model with honest copy when the bridge has no live model port', async () => {
   const element = root();
   pane().mount(element);
-  await vi.waitFor(() => expect(element.querySelector('[data-zchatgpt-model-allowed="gpt-5.6-luna"]')).not.toBeNull());
+  await vi.waitFor(() => expect(element.querySelector('[data-zchatgpt-model-allowed="gpt-6-astra"]')).not.toBeNull());
   expect(element.querySelector('[data-zchatgpt-model^="gpt-5.3"]')).toBeNull();
   expect(element.querySelector('[data-zchatgpt-pref="models-note"]')?.textContent).toMatch(/bundled catalog, not your account/u);
   pane().unmount(element);

@@ -39,6 +39,39 @@ async function runHostSmoke(config) {
     await Zotero.Libraries.get(Zotero.Libraries.userLibraryID).waitForDataLoad('item');
     const addon = await AddonManager.getAddonByID(config.subjectID); if (addon?.userDisabled) await addon.enable();
     await check('full-xpi-active', addon?.isActive && addon.version === config.subjectVersion);
+    const libraryAgentEntry = await until(() => win.document.querySelector('[data-zchatgpt-library-agent]'), 'library-agent-entry');
+    await check('library-agent-entry-visible-without-reader', Boolean(libraryAgentEntry && !libraryAgentEntry.hidden), { openReaders: Zotero.Reader._readers.length });
+    click(libraryAgentEntry);
+    const libraryAgentPanel = await until(() => win.document.querySelector('[data-zchatgpt-library-agent-panel]:not([hidden])'), 'library-agent-panel');
+    await check('library-agent-opens-without-reader', Boolean(libraryAgentPanel), { openReaders: Zotero.Reader._readers.length });
+    await until(() => !libraryAgentPanel.querySelector('[data-zchatgpt-library-chat-notice]')?.hidden, 'library-chat-selection-notice');
+    await check('library-workbench-defaults-to-chat-without-a-selected-article',
+      libraryAgentPanel.querySelector('[data-zchatgpt-library-mode="chat"]')?.getAttribute('aria-pressed') === 'true'
+        && libraryAgentPanel.querySelector('[data-zchatgpt-library-chat-notice]')?.textContent?.includes('Select one Zotero article')
+        && libraryAgentPanel.querySelector('.zchatgpt-library-draft')?.hidden === true,
+      { mode: libraryAgentPanel.querySelector('[data-zchatgpt-library-mode="chat"]')?.getAttribute('aria-pressed'), notice: libraryAgentPanel.querySelector('[data-zchatgpt-library-chat-notice]')?.textContent });
+    const toolbarBox = win.document.getElementById('zotero-toolbar-item-tree')?.getBoundingClientRect();
+    const listBox = win.document.getElementById('zotero-items-tree')?.getBoundingClientRect();
+    const agentBox = libraryAgentPanel.getBoundingClientRect();
+    const details = win.document.getElementById('zotero-item-pane');
+    const detailsBox = details?.getBoundingClientRect();
+    const resizerBox = win.document.querySelector('[aria-label="Resize Zotero ChatGPT sidebar"]')?.getBoundingClientRect();
+    const box = rect => rect && ({ left: Math.round(rect.left), top: Math.round(rect.top), right: Math.round(rect.right), bottom: Math.round(rect.bottom), width: Math.round(rect.width), height: Math.round(rect.height) });
+    const stacked = win.getComputedStyle(win.document.getElementById('zotero-items-pane')).flexDirection === 'column';
+    const dockGeometry = { toolbar: box(toolbarBox), list: box(listBox), resizer: box(resizerBox), agent: box(agentBox), nativeDetails: box(detailsBox), stacked, detailsDisplay: details ? win.getComputedStyle(details).display : null, panelParent: libraryAgentPanel.parentElement?.id ?? null };
+    const aligned = listBox && (stacked ? agentBox.top >= listBox.bottom - 2 && agentBox.top - listBox.bottom <= 12 && Math.abs(agentBox.left - listBox.left) <= 2
+      : agentBox.left >= listBox.right - 2 && agentBox.left - listBox.right <= 12);
+    await check('library-agent-docks-below-toolbar-beside-items', Boolean(toolbarBox && listBox && detailsBox && resizerBox && agentBox.top >= toolbarBox.bottom - 2 && aligned && detailsBox.left >= agentBox.right - 2 && listBox.width > 0 && detailsBox.width > 0 && dockGeometry.detailsDisplay !== 'none' && dockGeometry.panelParent === 'zotero-items-pane'), dockGeometry);
+    const dockResizer = win.document.querySelector('[aria-label="Resize Zotero ChatGPT sidebar"]');
+    const beforeResize = stacked ? libraryAgentPanel.getBoundingClientRect().height : libraryAgentPanel.getBoundingClientRect().width;
+    dockResizer?.dispatchEvent(new win.KeyboardEvent('keydown', { key: stacked ? 'ArrowUp' : 'ArrowLeft', bubbles: true, cancelable: true }));
+    const afterResize = stacked ? libraryAgentPanel.getBoundingClientRect().height : libraryAgentPanel.getBoundingClientRect().width;
+    await check('library-agent-resizes-with-native-sidebar-preserved', Boolean(dockResizer && !dockResizer.hidden && afterResize > beforeResize && win.document.getElementById('zotero-items-tree').getBoundingClientRect().width > 0 && details.getBoundingClientRect().width > 0), { stacked, before: Math.round(beforeResize), after: Math.round(afterResize), nativeDetailsWidth: Math.round(detailsBox.width) });
+    await until(() => libraryAgentPanel.querySelector('[aria-label="Message Zotero Agent"]'), 'library-agent-composer');
+    await delay(200);
+    const libraryAgentError = libraryAgentPanel.querySelector('[role="alert"]');
+    await check('library-agent-initial-render-has-no-runtime-error', Boolean(libraryAgentError?.hidden), { composerPresent: true, errorVisible: !libraryAgentError?.hidden });
+    click(libraryAgentEntry);
     const title = 'ZCHATGPT current-PDF synthetic context and native interaction test';
     const parent = new Zotero.Item('journalArticle'); parent.setField('title', title);
     let organizationFixture = null;
@@ -147,7 +180,11 @@ async function runHostSmoke(config) {
       note: 'Assertion source: IOUtils.stat + IOUtils.computeHexDigest + TextEncoder.prototype.encode, all called by the product on this PDF. This driver never calls them on this PDF.',
     };
     report.preparation = preparation;
+    click(libraryAgentEntry);
+    await until(() => libraryAgentPanel.hidden === false, 'library-agent-reopened-before-reader');
     const opened = await Zotero.Reader.open(a.id); let tabId = opened.tabID;
+    await until(() => libraryAgentPanel.hidden === true, 'library-agent-hidden-on-reader-tab', 10000);
+    await check('library-agent-closes-on-reader-tab-with-native-pane-intact', libraryAgentPanel.hidden && !win.document.getElementById('zotero-pane')?.classList.contains('zchatgpt-library-dock-open'), { selectedTab: win.Zotero_Tabs.selectedID, nativeDetailsDisplay: win.getComputedStyle(win.document.getElementById('zotero-item-pane')).display });
     const openedMs = Date.now() - t0;
     const reader = () => Zotero.Reader.getByTabID(tabId);
     const rdoc = () => reader()?._iframeWindow?.document;
@@ -171,6 +208,8 @@ async function runHostSmoke(config) {
     const panelSelectorsAbsent = () => { const doc = rdoc(); return Boolean(doc) && REMOVED_PANEL_SELECTORS.every(selector => !doc.querySelector(selector)); };
     await until(() => reader()?._internalReader?._primaryView?._iframeWindow?.PDFViewerApplication?.pdfDocument, 'pdf-loaded');
     await until(() => toggle(), 'toolbar-toggle');
+    const readerFind = rdoc()?.querySelector('.toolbar .find');
+    await check('reader-agent-entry-follows-search', Boolean(readerFind && readerFind.nextElementSibling === toggle()), { searchPresent: !!readerFind, entryPresent: !!toggle() });
     // --- Diagnostic: the disk side of the product's own revision precondition ---
     // capture() compares a sha256 of the whole loaded PDF against a sha256 of the file on disk, and a
     // non-match rejects the preparation with "The PDF file changed while this reader was open." This
@@ -697,6 +736,19 @@ async function runHostSmoke(config) {
       for (const file of files) if (file.endsWith('.json') && !file.endsWith('.source.json')) total += JSON.parse(await IOUtils.readUTF8(file)).requests.length;
       return total;
     };
+    const newestStoredRequestModel = async () => {
+      const files = await IOUtils.exists(records) ? await IOUtils.getChildren(records) : [];
+      const rows = [];
+      for (const file of files) {
+        if (!file.endsWith('.json') || file.endsWith('.source.json')) continue;
+        const record = JSON.parse(await IOUtils.readUTF8(file));
+        for (const request of record.requests ?? []) {
+          const user = (record.messages ?? []).find(message => message.role === 'user' && message.requestId === request.requestId);
+          rows.push({ at: request.createdAt, model: user?.settings?.model ?? null });
+        }
+      }
+      return rows.sort((a, b) => b.at.localeCompare(a.at))[0]?.model ?? null;
+    };
     const requests = await countStoredRequests();
     report.recordedRequests = requests;
     if (!config.live) {
@@ -744,6 +796,9 @@ async function runHostSmoke(config) {
     tabId = opened.tabID; win.Zotero_Tabs.select(tabId);
     await until(() => shell()?.dataset.attachmentKey === a.key, 'restore-main-attachment', 60000);
     if (config.live) {
+      // The preceding blank-PDF refusal can leave the restored Reader dock closed. A live send
+      // must explicitly reopen that same PDF's Agent surface before checking its account/model.
+      if (!panel()) { await until(toggle, 'restore-reader-toggle'); click(toggle()); await until(panel, 'restore-agent-sidebar', 10000); }
       report.notRun = report.notRun.filter(name => !['real-model-answer', 'live-status-shows-responding-and-waiting-seconds', 'in-flight-model-stop'].includes(name));
       if (config.liveCoreFlows) {
         const requestsBeforeLogin = await countStoredRequests();
@@ -764,6 +819,20 @@ async function runHostSmoke(config) {
       }
       await check('live-account-signed-in', panel().dataset.zchatgptAuth === 'signedIn');
       const picker = panel().querySelector('[data-zchatgpt-picker]');
+      // The preserved profile can have an old Astra draft. Never infer the test model from a
+      // default or a stored conversation: explicitly choose Sol/Luna before the first live send.
+      click(picker);
+      const lowCostOption = await until(() => ['gpt-6-sol', 'gpt-6-luna'].map(id => panel()?.querySelector(`[data-zchatgpt-setting="model"][data-zchatgpt-value="${id}"]`)).find(option => option && !option.disabled) ?? null, 'live-low-cost-model-option', 10000).catch(() => null);
+      if (!lowCostOption) {
+        report.status = 'blocked'; report.blockedStage = 'sol-or-luna-model-unavailable'; report.finishedAt = new Date().toISOString();
+        if (config.liveCoreFlows) report.liveCoreFlows.status = 'blocked';
+        await save(); return;
+      }
+      click(lowCostOption);
+      report.testModel = lowCostOption.dataset.zchatgptValue;
+      const selectedLowCost = await until(() => new RegExp(report.testModel === 'gpt-6-sol' ? 'Sol' : 'Luna', 'u').test(picker.textContent ?? ''), 'live-low-cost-model-selected', 10000).catch(() => null);
+      await check('live-low-cost-model-selected-before-send', Boolean(selectedLowCost) && ['gpt-6-sol', 'gpt-6-luna'].includes(report.testModel), { model: report.testModel, picker: picker.textContent });
+      if (picker.getAttribute('aria-expanded') === 'true') click(picker);
       report.liveModel = picker.textContent;
       if (config.liveCoreFlows) {
         const tagNames = item => item.getTags().map(entry => entry.tag).sort();
@@ -777,17 +846,16 @@ async function runHostSmoke(config) {
           click(send); if (afterClick) await afterClick();
           await until(() => panel()?.dataset.zchatgptGenerating === 'true', `${label}-request-accepted`, 30000);
           await until(() => panel()?.dataset.zchatgptGenerating === 'false', `${label}-request-terminal`, 180000);
+          const issuedModel = await newestStoredRequestModel();
+          await check(`${label}-uses-selected-low-cost-model`, issuedModel === report.testModel, { expected: report.testModel, actual: issuedModel });
           report.liveCoreFlows.modelTurns += 1; await save();
         };
         const annotationsBefore = a.getAnnotations().length;
         await sendAgent('Highlight the five most important scientifically meaningful sentences in the current PDF. Use native Zotero highlights and propose only exact quotations that appear verbatim in this PDF.', 'live-annotation');
-        const annotationCard = await until(() => taskCard('Annotations'), 'live-annotation-review', 60000);
-        await check('live-core-annotation-review-before-write', annotationCard.dataset.state === 'review' && annotationCard.querySelectorAll('[data-zchatgpt-task-item-id]').length === 5 && a.getAnnotations().length === annotationsBefore, { candidates: annotationCard.querySelectorAll('[data-zchatgpt-task-item-id]').length, nativeAnnotationsBefore: annotationsBefore });
-        click(annotationCard.querySelector('[data-zchatgpt-task-action="approve"]'));
-        await until(() => annotationCard.dataset.state === 'completed', 'live-annotation-applied', 60000); await a.loadAllData();
+        const annotationCard = await until(() => { const card = taskCard('Annotations'); return card && ['completed', 'partial', 'failed'].includes(card.dataset.state) ? card : null; }, 'live-annotation-auto-applied', 60000); await a.loadAllData();
         const createdAnnotations = a.getAnnotations().length - annotationsBefore;
-        await check('live-core-annotation-native-readback', createdAnnotations === 5, { createdAnnotations, attachmentKey: a.key });
-        toggle().click(); await until(() => !panel(), 'live-annotation-sidebar-closed'); toggle().click(); await until(() => taskCard('Annotations')?.dataset.state === 'completed', 'live-annotation-sidebar-reopened', 60000);
+        await check('live-core-annotation-auto-native-readback', ['completed', 'partial'].includes(annotationCard.dataset.state) && createdAnnotations > 0 && createdAnnotations <= 5 && annotationCard.querySelector('[data-zchatgpt-task-action="approve"]')?.hidden === true, { state: annotationCard.dataset.state, createdAnnotations, attachmentKey: a.key });
+        toggle().click(); await until(() => !panel(), 'live-annotation-sidebar-closed'); toggle().click(); await until(() => ['completed', 'partial'].includes(taskCard('Annotations')?.dataset.state), 'live-annotation-sidebar-reopened', 60000);
         const reopenedAnnotationCard = taskCard('Annotations'); const viewer = pdfViewer(); viewer.currentScaleValue = 'page-width'; const scaleBeforeOutput = viewer.currentScaleValue;
         let rotationBeforeOutput = viewer.pagesRotation; if (typeof rotationBeforeOutput === 'number') { viewer.pagesRotation = (rotationBeforeOutput + 90) % 360; rotationBeforeOutput = viewer.pagesRotation; }
         click(reopenedAnnotationCard.querySelector('[data-zchatgpt-task-action="output"]')); await delay(500);
@@ -827,6 +895,8 @@ async function runHostSmoke(config) {
       await until(() => panel()?.dataset.zchatgptGenerating === 'false', 'live-answer-terminal', 120000);
       const record = JSON.parse(await IOUtils.readUTF8(PathUtils.join(records, `${conversationA}.json`)));
       const last = record.requests.at(-1);
+      const issuedModel = record.messages.find(m => m.requestId === last?.requestId && m.role === 'user')?.settings?.model ?? null;
+      await check('live-request-uses-selected-low-cost-model', issuedModel === report.testModel, { expected: report.testModel, actual: issuedModel });
       const answer = record.messages.filter(m => m.role === 'assistant' && m.requestId === last?.requestId).map(m => m.text).join('\n');
       report.live = { state: last?.state, latencyMs: win.performance.now() - started, answer: answer.slice(0, 1600), inputDocumentId: record.messages.find(m => m.requestId === last?.requestId && m.role === 'user')?.document?.id };
       await check('real-model-answer', last?.state === 'completed' && answer.trim().length > 0, { state: last?.state, characters: answer.length });
@@ -839,6 +909,8 @@ async function runHostSmoke(config) {
       await until(() => panel()?.querySelector('[data-status="streaming"] [data-zchatgpt-text]')?.textContent?.length > 0 || panel()?.dataset.zchatgptGenerating === 'false', 'live-followup-output', 120000);
       const stop = panel().querySelector('[data-zchatgpt-action="stop"]'); if (panel().dataset.zchatgptGenerating === 'true') stop.click();
       await until(() => panel()?.dataset.zchatgptGenerating === 'false', 'live-followup-stopped', 30000);
+      const followupModel = await newestStoredRequestModel();
+      await check('live-followup-uses-selected-low-cost-model', followupModel === report.testModel, { expected: report.testModel, actual: followupModel });
       const afterStop = JSON.parse(await IOUtils.readUTF8(PathUtils.join(records, `${conversationA}.json`)));
       const terminal = afterStop.requests.at(-1)?.state;
       report.live.stopState = terminal;

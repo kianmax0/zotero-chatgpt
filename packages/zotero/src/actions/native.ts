@@ -1,7 +1,8 @@
 import { clone } from '../../../contracts/src/clone.ts';
-import { NATIVE_ANNOTATION_PROVENANCE, type NativeAcquisitionResult, type NativeActionPort, type NativeReaderPort } from '../../../contracts/src/native.ts';
+import { NATIVE_ANNOTATION_PROVENANCE, type NativeAcquisitionResult, type NativeActionPort, type NativeChildNoteSnapshot, type NativeCollectionSnapshot, type NativeFigureCalloutInput, type NativeMetadataFill, type NativeMetadataUpdateChange, type NativeReaderPort } from '../../../contracts/src/native.ts';
+import { childNoteHTML as renderChildNoteHTML } from '../../../contracts/src/tasks.ts';
 import { boundary, checkSignal, createNativeSupport, equal, fail, key, normalizedTitle, object, publicURL, string, waitRead, type NativeSupport, type NativeSupportOptions } from '../library/native-support.ts';
-import { createNativeReaderPort } from '../library/native-read.ts';
+import { createNativeReaderPort, nativeCollectionSnapshot } from '../library/native-read.ts';
 
 const AI_PREFIX = NATIVE_ANNOTATION_PROVENANCE;
 const MAX_PDF_BYTES = 64 * 1024 * 1024;
@@ -12,6 +13,38 @@ function organizationTags(value: unknown, max = MAX_ORGANIZATION_VALUES): string
   const result = value.map(raw => string(raw, 128).trim().normalize('NFC'));
   if (result.some(tag => !tag || /[\u0000-\u001f]/u.test(tag)) || new Set(result).size !== result.length) fail('INVALID_INPUT', 'Choose unique nonempty Zotero tags.');
   return result;
+}
+const FILL_FIELDS = ['title', 'DOI', 'url', 'date', 'publicationTitle', 'bookTitle', 'conferenceName', 'volume', 'issue', 'pages', 'publisher', 'place', 'ISBN', 'abstractNote', 'language'] as const;
+function metadataFill(value: unknown, cleanDOI: (value: string) => string): NativeMetadataFill {
+  const raw = object(value); if (!Object.keys(raw).length || Object.keys(raw).some(name => !(FILL_FIELDS as readonly string[]).includes(name))) fail('INVALID_INPUT', 'Only allowlisted bibliographic fields can be filled.');
+  const result: NativeMetadataFill = {};
+  for (const field of FILL_FIELDS) {
+    const value = raw[field]; if (value === undefined) continue;
+    if (typeof value !== 'string' || !value.trim() || value.length > (field === 'abstractNote' ? 32768 : 8192)) fail('INVALID_INPUT', 'Metadata field value is invalid.');
+    if (field === 'DOI') { const doi = cleanDOI(value); if (!doi) fail('INVALID_INPUT', 'Metadata DOI is invalid.'); result.DOI = doi; }
+    else if (field === 'url') { const url = publicURL(value); if (!url) fail('INVALID_INPUT', 'Metadata URL is invalid.'); result.url = url; }
+    else result[field] = value.trim();
+  }
+  return result;
+}
+function childNoteHTML(value: unknown): string {
+  if (typeof value !== 'string' || !value.trim() || value.length > 24000 || value.includes('\0')) fail('INVALID_INPUT', 'The note text is empty or too long.');
+  return renderChildNoteHTML(value);
+}
+function collectionName(value: unknown): string {
+  if (typeof value !== 'string') fail('INVALID_INPUT', 'Enter a collection name.');
+  const name = value.trim().normalize('NFC');
+  if (!name || name.length > 128 || /[\u0000-\u001f]/u.test(name)) fail('INVALID_INPUT', 'The collection name is empty or invalid.');
+  return name;
+}
+function imageBlob(value: unknown): Blob {
+  const image = object(value); const dataUrl = string(image.dataUrl, 3 * 1024 * 1024);
+  const match = /^data:image\/png;base64,([A-Za-z0-9+/]+={0,2})$/u.exec(dataUrl);
+  if (image.mime !== 'image/png' || !match) fail('INVALID_INPUT', 'Figure annotation images must be verified PNG data.');
+  const encoded = atob(match[1]!); const bytes = new Uint8Array(encoded.length);
+  for (let i = 0; i < encoded.length; i++) bytes[i] = encoded.charCodeAt(i);
+  const buffer = new ArrayBuffer(bytes.length); new Uint8Array(buffer).set(bytes);
+  return new Blob([buffer], { type: 'image/png' });
 }
 
 /**
@@ -47,6 +80,34 @@ export function createNativeActionPort(support: NativeSupport, reader: NativeRea
       } catch { /* A DB commit may precede a notifier failure. Reconcile by the reserved key. */ }
       fail('WRITE_UNCERTAIN', 'Annotation save was not confirmed. Reconcile its reserved key before retrying.');
     }),
+    createFigureCallout: (value: NativeFigureCalloutInput, signal) => boundary(async () => {
+      checkSignal(signal); const input = clone(value); const prepared = await support.prepareFigureCallout(input, signal); const attachment = support.paper(prepared.selection.paper);
+      if (!attachment.isEditable() || !z.Libraries.get(attachment.libraryID)?.editable) fail('NOT_EDITABLE', 'The selected PDF does not allow figure annotation writes.');
+      if (z.Items.getByLibraryAndKey(attachment.libraryID, input.imageKey) || z.Items.getByLibraryAndKey(attachment.libraryID, input.inkKey)) fail('CONFLICT', 'A reserved figure annotation key is already in use.');
+      const crop = imageBlob(input.image); checkSignal(signal);
+      let writeStarted = false;
+      try {
+        // Zotero's saveFromJSON owns saveTx; its image cache is a separate, required sidecar write.
+        writeStarted = true;
+        const area = await z.Annotations.saveFromJSON(attachment, { ...prepared.image, tags: [] }, { skipSelect: true });
+        await z.Annotations.saveCacheImage(area, crop);
+        const savedArea = await support.figureAnnotationSnapshot(prepared.selection.paper, area);
+        if (!savedArea) fail('WRITE_UNCERTAIN', 'The Zotero figure area was saved but its cached image could not be read back.');
+        const savedAreaRecord = support.figureAnnotationRecord(prepared.selection.paper, area);
+        const savedAreaFields: Record<string, unknown> = savedAreaRecord ? { ...savedAreaRecord } : {};
+        delete savedAreaFields.dateModified;
+        const expectedAreaRecord: Record<string, unknown> = { ...prepared.image }; delete expectedAreaRecord.dateModified; delete expectedAreaRecord.imageSHA256;
+        if (!savedAreaRecord || !equal(savedAreaFields, expectedAreaRecord)) fail('WRITE_UNCERTAIN', 'The Zotero figure area was saved but its native record did not match.');
+        const ink = await z.Annotations.saveFromJSON(attachment, { ...prepared.ink, tags: [] }, { skipSelect: true });
+        await z.Annotations.saveCacheImage(ink, crop);
+        const inspection = await reader.inspectFigureCallout(input, signal);
+        if (inspection.status !== 'complete') fail('WRITE_UNCERTAIN', 'The Zotero figure callout pair could not be read back exactly.');
+        return inspection.callout;
+      } catch (error) {
+        if (writeStarted) fail('WRITE_UNCERTAIN', 'A figure callout write may have partially completed; reconcile both reserved keys before retrying.');
+        throw error;
+      }
+    }),
     deleteAnnotation: (value, signal) => boundary(async () => {
       checkSignal(signal); const expected = clone(value.expected); support.paper(expected.paper); key(expected.key);
       return z.DB.executeTransaction(async () => {
@@ -57,6 +118,53 @@ export function createNativeActionPort(support: NativeSupport, reader: NativeRea
         try { await item.erase(); } catch { fail('WRITE_UNCERTAIN', 'Annotation removal was not confirmed. Reconcile its key before retrying.'); }
         return { status: 'deleted' };
       });
+    }),
+    deleteFigureCallout: (value, signal) => boundary(async () => {
+      checkSignal(signal); const expected = clone(value.expected); const attachment = support.paper(expected.selection.paper);
+      key(expected.image.key); key(expected.ink.key);
+      if (expected.image.key === expected.ink.key || expected.image.type !== 'image' || expected.ink.type !== 'ink' || !expected.image.comment.startsWith(AI_PREFIX) || !expected.ink.comment.startsWith(AI_PREFIX)) fail('INVALID_INPUT', 'The recorded figure callout identity is inconsistent.');
+      const imageItem = z.Items.getByLibraryAndKey(attachment.libraryID, expected.image.key);
+      const inkItem = z.Items.getByLibraryAndKey(attachment.libraryID, expected.ink.key);
+      if (!imageItem && !inkItem) return { status: 'absent' };
+      if (!imageItem || !inkItem || !attachment.isEditable() || !z.Libraries.get(attachment.libraryID)?.editable) return { status: 'conflict' };
+      await imageItem.loadAllData?.(); await inkItem.loadAllData?.(); checkSignal(signal);
+      const [imageSnapshot, inkSnapshot] = await Promise.all([
+        support.figureAnnotationSnapshot(expected.selection.paper, imageItem),
+        support.figureAnnotationSnapshot(expected.selection.paper, inkItem),
+      ]);
+      const imageRecord = support.figureAnnotationRecord(expected.selection.paper, imageItem);
+      const inkRecord = support.figureAnnotationRecord(expected.selection.paper, inkItem);
+      const expectedImageRecord: Record<string, unknown> = { ...expected.image }; delete expectedImageRecord.imageSHA256;
+      const expectedInkRecord: Record<string, unknown> = { ...expected.ink }; delete expectedInkRecord.imageSHA256;
+      if (!imageSnapshot || !inkSnapshot || !imageRecord || !inkRecord || !equal(imageRecord, expectedImageRecord) || !equal(inkRecord, expectedInkRecord)) return { status: 'conflict' };
+      const transactionResult: { status: 'deleted' | 'conflict' } = { status: 'deleted' };
+      try {
+        await z.DB.executeTransaction(async () => {
+          checkSignal(signal);
+          const currentImage = z.Items.getByLibraryAndKey(attachment.libraryID, expected.image.key);
+          const currentInk = z.Items.getByLibraryAndKey(attachment.libraryID, expected.ink.key);
+          if (!currentImage || !currentInk) { transactionResult.status = 'conflict'; return; }
+          await currentImage.loadAllData?.(); await currentInk.loadAllData?.(); checkSignal(signal);
+          const imageRecord = support.figureAnnotationRecord(expected.selection.paper, currentImage);
+          const inkRecord = support.figureAnnotationRecord(expected.selection.paper, currentInk);
+          const expectedImageRecord: Record<string, unknown> = { ...expected.image }; delete expectedImageRecord.imageSHA256;
+          const expectedInkRecord: Record<string, unknown> = { ...expected.ink }; delete expectedInkRecord.imageSHA256;
+          if (!imageRecord || !inkRecord || !equal(imageRecord, expectedImageRecord) || !equal(inkRecord, expectedInkRecord) || !currentImage.isEditable() || !currentInk.isEditable()) { transactionResult.status = 'conflict'; return; }
+          await currentImage.erase(); await currentInk.erase();
+        });
+      } catch {
+        fail('WRITE_UNCERTAIN', 'Figure annotation removal was not confirmed. Reconcile before retrying.');
+      }
+      if (transactionResult.status === 'conflict') return { status: 'conflict' };
+      const remaining = z.Items.getByLibraryAndKey(attachment.libraryID, expected.image.key) || z.Items.getByLibraryAndKey(attachment.libraryID, expected.ink.key);
+      if (remaining) fail('WRITE_UNCERTAIN', 'Figure annotation removal was not confirmed. Reconcile before retrying.');
+      // Zotero 9.0.6 stores cached annotation PNGs outside the item transaction. Records are the
+      // authoritative output; remove their derived cache files best-effort after the atomic erase.
+      await Promise.allSettled([
+        z.Annotations.removeCacheImage({ libraryID: attachment.libraryID, key: expected.image.key }),
+        z.Annotations.removeCacheImage({ libraryID: attachment.libraryID, key: expected.ink.key }),
+      ]);
+      return { status: 'deleted' };
     }),
     createItem: (value, signal) => boundary(async () => {
       checkSignal(signal); const input = clone(value); support.scope(input.target); key(input.key); key(input.target.collectionKey);
@@ -72,6 +180,121 @@ export function createNativeActionPort(support: NativeSupport, reader: NativeRea
         const item = new z.Item(metadata.itemType); item.libraryID = input.target.libraryId; item.key = input.key; await item.loadPrimaryData(); checkSignal(signal); item.fromJSON(metadata); item.addToCollection(input.target.collectionKey);
         try { await item.save({ skipSelect: true }); return support.itemSnapshot(item); }
         catch { fail('WRITE_UNCERTAIN', 'Metadata save was not confirmed. Reconcile the reserved key before retrying.'); }
+      });
+    }),
+    createCollection: (value, signal) => boundary(async () => {
+      checkSignal(signal); const input = clone(value); support.scope(input.target); key(input.key); const name = collectionName(input.name);
+      const targetParent = input.target.parentCollectionKey;
+      if (targetParent !== null) key(targetParent);
+      try {
+        await z.DB.executeTransaction(async () => {
+          checkSignal(signal);
+          const library = z.Libraries.get(input.target.libraryId);
+          if (!library?.editable) fail('NOT_EDITABLE', 'The Zotero library is read-only.');
+          const parent = targetParent === null ? null : z.Collections.getByLibraryAndKey(input.target.libraryId, targetParent);
+          if (targetParent !== null && (!parent || parent.deleted || parent.libraryID !== input.target.libraryId)) fail('NOT_FOUND', 'The selected parent collection is no longer available.');
+          if (parent && !parent.isEditable()) fail('NOT_EDITABLE', 'The selected parent collection is read-only.');
+          if (z.Collections.getByLibraryAndKey(input.target.libraryId, input.key)) fail('CONFLICT', 'The reserved collection key is already in use.');
+          const siblings = parent
+            ? (await parent.loadDataType('childCollections'), parent.getChildCollections(false, true))
+            : z.Collections.getByLibrary(input.target.libraryId, false, true);
+          if (siblings.some(value => { const sibling = typeof value === 'number' ? z.Collections.get(value) : value; return !!sibling && !sibling.deleted && sibling.name.trim().normalize('NFC').toLocaleLowerCase() === name.toLocaleLowerCase(); })) fail('CONFLICT', 'A collection with this name already exists at the selected level.');
+          const collection = new z.Collection(); collection.libraryID = input.target.libraryId; collection.key = input.key; collection.name = name; collection.parentKey = targetParent || false;
+          try { await collection.save({ skipSelect: true }); } catch { fail('WRITE_UNCERTAIN', 'The new Zotero collection was not confirmed. Reconcile its reserved key before retrying.'); }
+        });
+      } catch (error) {
+        if (isNativeOperationError(error) && ['CANCELLED', 'CONFLICT', 'NOT_FOUND', 'NOT_EDITABLE'].includes(error.code)) throw error;
+        if (isNativeOperationError(error) && error.code === 'WRITE_UNCERTAIN') throw error;
+        fail('WRITE_UNCERTAIN', 'The new Zotero collection was not confirmed. Reconcile its reserved key before retrying.');
+      }
+      const saved = await reader.inspectCollection({ clientId: input.target.clientId, libraryId: input.target.libraryId, collectionKey: input.key }, signal);
+      if (!saved || saved.name !== name || saved.parentKey !== targetParent || saved.childItemKeys.length || saved.childCollectionKeys.length) fail('WRITE_UNCERTAIN', 'The new Zotero collection could not be verified after saving.');
+      return saved satisfies NativeCollectionSnapshot;
+    }),
+    undoCreatedCollection: (value, signal) => boundary(async () => {
+      checkSignal(signal); const expected = clone(value.expected); support.scope(expected); key(expected.collectionKey);
+      const current = await reader.inspectCollection(expected, signal); if (!current) return { status: 'absent' };
+      if (!equal(current, expected) || current.childItemKeys.length || current.childCollectionKeys.length) return { status: 'conflict' };
+      const collection = z.Collections.getByLibraryAndKey(expected.libraryId, expected.collectionKey); if (!collection || collection.deleted || !collection.isEditable() || !z.Libraries.get(expected.libraryId)?.editable) return { status: 'conflict' };
+      return z.DB.executeTransaction(async () => {
+        await collection.loadDataType('primaryData'); await collection.loadDataType('childItems'); await collection.loadDataType('childCollections'); checkSignal(signal);
+        if (collection.deleted || !equal(nativeCollectionSnapshot(support, collection), expected) || collection.getChildItems(true, true).length || collection.getChildCollections(true, true).length) return { status: 'conflict' };
+        collection.deleted = true;
+        try { await collection.save({ skipSelect: true }); } catch { fail('WRITE_UNCERTAIN', 'The new collection was not moved to the Zotero trash.'); }
+        return { status: 'trashed' };
+      });
+    }),
+    fillMissingMetadata: (value, signal) => boundary(async () => {
+      checkSignal(signal); const input = clone(value); support.scope(input.expected); key(input.expected.key);
+      const fields = metadataFill(input.fields, value => support.cleanDOI(value));
+      return z.DB.executeTransaction(async () => {
+        const item = support.getItem(input.expected); if (!item) fail('NOT_FOUND', 'The selected Zotero item is no longer available.');
+        await item.loadAllData?.(); checkSignal(signal); const before = support.itemSnapshot(item);
+        if (!equal(before, input.expected)) fail('CONFLICT', 'The selected Zotero item changed after the metadata preview.');
+        if (!item.isEditable() || !z.Libraries.get(item.libraryID)?.editable) fail('NOT_EDITABLE', 'The selected Zotero item is read-only.');
+        for (const field of Object.keys(fields) as Array<keyof NativeMetadataFill>) {
+          const current = before.metadata[field];
+          if (typeof current === 'string' && current.trim()) fail('CONFLICT', 'A bibliographic field is no longer blank.');
+          if (field === 'DOI' && before.metadata.DOI && support.cleanDOI(before.metadata.DOI) !== fields.DOI) fail('CONFLICT', 'The item DOI changed after the metadata preview.');
+        }
+        for (const [field, fieldValue] of Object.entries(fields)) item.setField(field, fieldValue);
+        try { await item.save({ skipSelect: true }); } catch { fail('WRITE_UNCERTAIN', 'Metadata changes were not confirmed. Reconcile the item before retrying.'); }
+        const after = support.itemSnapshot(item);
+        for (const [field, fieldValue] of Object.entries(fields)) if (after.metadata[field as keyof typeof after.metadata] !== fieldValue) fail('WRITE_UNCERTAIN', 'Metadata changes could not be verified after saving.');
+        if (!equal(after.collectionKeys, before.collectionKeys) || !equal(after.attachmentKeys, before.attachmentKeys)) fail('WRITE_UNCERTAIN', 'The item changed outside the approved metadata fields.');
+        return { before, after, fields } satisfies NativeMetadataUpdateChange;
+      });
+    }),
+    undoMetadataFill: (value, signal) => boundary(async () => {
+      checkSignal(signal); const expected = clone(value.expected); support.scope(expected.after); support.scope(expected.before);
+      if (expected.before.key !== expected.after.key || expected.before.clientId !== expected.after.clientId || expected.before.libraryId !== expected.after.libraryId) fail('INVALID_INPUT', 'The metadata task item identity is inconsistent.');
+      const fields = metadataFill(expected.fields, value => support.cleanDOI(value));
+      return z.DB.executeTransaction(async () => {
+        const item = support.getItem(expected.after); if (!item) return { status: 'absent' };
+        await item.loadAllData?.(); checkSignal(signal); const current = support.itemSnapshot(item);
+        if (!equal(current, expected.after) || !item.isEditable()) return { status: 'conflict' };
+        for (const field of Object.keys(fields) as Array<keyof NativeMetadataFill>) item.setField(field, expected.before.metadata[field] ?? '');
+        try { await item.save({ skipSelect: true }); } catch { fail('WRITE_UNCERTAIN', 'Metadata restoration was not confirmed.'); }
+        const after = support.itemSnapshot(item);
+        if (!equal(after.metadata, expected.before.metadata) || !equal(after.collectionKeys, expected.before.collectionKeys) || !equal(after.attachmentKeys, expected.before.attachmentKeys)) fail('WRITE_UNCERTAIN', 'Metadata restoration could not be verified.');
+        return { status: 'removed' };
+      });
+    }),
+    createChildNote: (value, signal) => boundary(async () => {
+      checkSignal(signal); const input = clone(value); support.scope(input.parent); key(input.parent.key); key(input.key);
+      const html = childNoteHTML(input.body);
+      try {
+        await z.DB.executeTransaction(async () => {
+          checkSignal(signal);
+          const existing = z.Items.getByLibraryAndKey(input.parent.libraryId, input.key); if (existing) fail('CONFLICT', 'The reserved child-note key is already in use.');
+          const parent = support.getItem(input.parent); if (!parent) fail('NOT_FOUND', 'The selected Zotero item is no longer available.');
+          await parent.loadAllData?.(); checkSignal(signal);
+          if (!equal(support.itemSnapshot(parent), input.parent)) fail('CONFLICT', 'The selected Zotero item changed after the note preview.');
+          if (!parent.isEditable() || !z.Libraries.get(parent.libraryID)?.editable) fail('NOT_EDITABLE', 'The selected Zotero item is read-only.');
+          const note = new z.Item('note'); note.libraryID = parent.libraryID; note.parentID = parent.id; note.key = input.key; note.setNote(html);
+          await note.save({ skipSelect: true });
+        });
+      } catch (error) {
+        if (isNativeOperationError(error) && ['CANCELLED', 'CONFLICT', 'NOT_FOUND', 'NOT_EDITABLE'].includes(error.code)) throw error;
+        fail('WRITE_UNCERTAIN', 'The child note was not confirmed. Reconcile its reserved key before retrying.');
+      }
+      const saved = await reader.inspectChildNote({ clientId: support.clientId, libraryId: input.parent.libraryId, key: input.key, parentKey: input.parent.key }, signal);
+      if (!saved || saved.body !== html || !saved.body.includes('data-zchatgpt-provenance="zotero-chatgpt"')) fail('WRITE_UNCERTAIN', 'The child note could not be verified after saving.');
+      return saved satisfies NativeChildNoteSnapshot;
+    }),
+    undoChildNote: (value, signal) => boundary(async () => {
+      checkSignal(signal); const expected = clone(value.expected); support.scope(expected); key(expected.key); key(expected.parentKey);
+      const current = await reader.inspectChildNote({ clientId: expected.clientId, libraryId: expected.libraryId, key: expected.key, parentKey: expected.parentKey }, signal);
+      if (!current) return { status: 'absent' };
+      if (!equal(current, expected) || !current.body.includes('data-zchatgpt-provenance="zotero-chatgpt"')) return { status: 'conflict' };
+      const note = z.Items.getByLibraryAndKey(expected.libraryId, expected.key); if (!note || !note.isEditable()) return { status: 'conflict' };
+      return z.DB.executeTransaction(async () => {
+        await note.loadAllData?.(); checkSignal(signal);
+        if (note.deleted || note.itemType !== 'note' || note.getNote() !== expected.body || support.contentSignature(note) !== expected.contentSignature) return { status: 'conflict' };
+        note.deleted = true;
+        try { await note.save({ skipSelect: true }); } catch { fail('WRITE_UNCERTAIN', 'The generated note was not moved to trash.'); }
+        if (await reader.inspectChildNote({ clientId: expected.clientId, libraryId: expected.libraryId, key: expected.key, parentKey: expected.parentKey }, signal)) fail('WRITE_UNCERTAIN', 'The generated note remains after undo.');
+        return { status: 'trashed' };
       });
     }),
     addItemToCollection: (value, signal) => boundary(async () => {

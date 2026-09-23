@@ -46,7 +46,7 @@ export function createLocalServices(host: RuntimeHost, zotero: unknown, namespac
     void coordinator.catch(() => { if (activeReader === entry) activeReader = undefined; });
     return coordinator;
   };
-  return { getWorkspace, getTasks, getReading, library, async stop(): Promise<void> {
+  return { getStorage: records, getWorkspace, getTasks, getReading, library, async stop(): Promise<void> {
     stopped = true;
     const work: Array<Promise<unknown>> = [];
     for (const reader of [activeReader?.coordinator, offlineReader]) if (reader) work.push(reader.then(reader => reader.dispose()));

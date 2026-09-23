@@ -1,5 +1,5 @@
 import type { AllowedModel, Personalization, ReaderSkill, WorkspaceSettings } from '../../../contracts/src/workspace.ts';
-import { defaultAllowedModels, isOfferableModelId, MODEL_ID, modelChoices, modelLabel, unofferableAllowedModelIds, type ModelCandidate } from '../../../core/src/workspace/allowed-models.ts';
+import { defaultAllowedModels, isDefaultAllowedModels, isOfferableModelId, MODEL_ID, modelChoices, modelLabel, unofferableAllowedModelIds, type ModelCandidate } from '../../../core/src/workspace/allowed-models.ts';
 import { CHAT_TEXT_SCALE_MAX, CHAT_TEXT_SCALE_MIN, clampChatTextScale } from '../chat/text-scale.ts';
 import { mountUILocale } from '../chat/ui-locale.ts';
 import { createHistorySection, type HistorySection } from './history-section.ts';
@@ -65,10 +65,11 @@ function offeredSkill(skill: ReaderSkill): boolean {
  * Stateful copy for the model fieldset. Two things have to be said and nothing else: checking a row
  * is what makes a model offered in chats, and the exact id under the row is what is actually sent.
  * The provenance sentence stays because it is the one thing the rows cannot show by themselves —
- * the GPT-5.3 Spark family is not in the bundled catalog and can only arrive from the runtime.
+ * GPT-6 Sol and Luna are not in the bundled catalog and appear only after the live runtime reports
+ * their exact ids.
  * Both sentences are exact keys in `chat/ui-locale.ts`.
  */
-const MODELS_NOTE_BUNDLED = 'Checked models are offered in Agent requests; the exact id is what is sent. Source: the bundled catalog, not your account\'s live entitlements, plus any GPT-5.3-Spark the running runtime reports.';
+const MODELS_NOTE_BUNDLED = 'Checked models are offered in Agent requests; the exact id is what is sent. Source: the bundled catalog, not your account\'s live entitlements.';
 const MODELS_NOTE_LIVE = 'Checked models are offered in Agent requests; the exact id is what is sent. Source: the running runtime\'s report plus the bundled catalog.';
 
 function message(error: unknown): string {
@@ -124,7 +125,7 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
   /**
    * The runtime's offerable live model ids, or null when there is no live list to show. A missing
    * port, a null report, an empty report, a failed read and a report whose ids are all outside the
-   * offerable families all mean the same thing to the pane — the bundled catalog is all it can show —
+   * offerable models all mean the same thing to the pane — the bundled catalog is all it can show —
    * so none of them can half-render a row, invent an id, or switch the note to a live-list claim the
    * rows do not support.
    */
@@ -213,30 +214,15 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
     // PDF text holds the automatic-PDF-text opt-out. It is a plugin preference, not a workspace
     // field: the pane reads and writes `extensions.zchatgpt.automaticPdfText` directly so it is the
     // single source of truth for every reader, including an already-open sidebar.
-    const automaticPdfLabel = element(doc, 'label', 'Use current PDF text automatically');
+    const automaticPdfLabel = element(doc, 'label', 'Use current paper context automatically');
     const automaticPdfText = element(doc, 'input');
     automaticPdfText.type = 'checkbox'; automaticPdfText.dataset.zchatgptPref = 'automatic-pdf-text';
     automaticPdfLabel.append(automaticPdfText);
     general.append(automaticPdfLabel);
 
-    // Chat is an explanation, not a second settings surface: the official website owns its account,
-    // models and conversations, so there is nothing here that could control them.
-    const chatSection = fieldset(doc, container, 'Chat');
-    const chatNote = element(doc, 'p', 'Chat opens the official ChatGPT website in the sidebar. Its account, models, conversations and limits are managed by ChatGPT, not by this plugin.');
-    chatNote.className = 'zchatgpt-preferences-muted';
-    chatNote.dataset.zchatgptPref = 'chat-note';
-    const chatWebNote = element(doc, 'p', 'The plugin adds only the paper context it may attach to a message you send there. It never sends a Codex request for Chat.');
-    chatWebNote.className = 'zchatgpt-preferences-muted';
-    chatWebNote.dataset.zchatgptPref = 'chat-note-web';
-    chatSection.append(chatNote, chatWebNote);
-
-    // Agent groups everything that belongs to Codex: its connection, the model allowlist, the
-    // instructions box and the installed skills. Opening this pane never starts Codex.
+    // Chat's account and model controls live on the official website, so this pane only renders
+    // actual plugin settings. Agent groups its model allowlist, instructions and installed skills.
     const agentSection = fieldset(doc, container, 'Agent');
-    const agentNote = element(doc, 'p', 'Codex starts only when you use Agent. Opening this window reads local settings and any cached model report; it never connects.');
-    agentNote.className = 'zchatgpt-preferences-muted';
-    agentNote.dataset.zchatgptPref = 'agent-note';
-    agentSection.append(agentNote);
 
     const modelsHeading = element(doc, 'div', 'Models');
     modelsHeading.className = 'zchatgpt-preferences-subhead';
@@ -247,21 +233,15 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
     note.className = 'zchatgpt-preferences-muted';
     note.dataset.zchatgptPref = 'models-note';
     modelsNote = note;
+    const modelDetails = element(doc, 'details');
+    modelDetails.append(element(doc, 'summary', 'Model availability'), note);
     const models = element(doc, 'div');
     models.dataset.zchatgptPref = 'models';
-    agentSection.append(modelsHeading, note, models);
+    agentSection.append(modelsHeading, modelDetails, models);
 
-    // The single instructions box is Agent-scoped: it persists in `background` and reaches every
-    // Agent request in the frozen `workflow.preferences` snapshot. Chat and the official web page
-    // never see it. The sub-heading, the scope note and the Save row are appended in reading order
-    // around the field, so the box never ends up above its own heading.
-    const instructionsHeading = element(doc, 'div', 'Agent instructions');
-    instructionsHeading.className = 'zchatgpt-preferences-subhead';
-    const instructionNote = element(doc, 'p', 'Applies only to Agent requests.');
-    instructionNote.className = 'zchatgpt-preferences-muted';
-    instructionNote.dataset.zchatgptPref = 'instructions-note';
-    agentSection.append(instructionsHeading, instructionNote);
-    const instructionsLabel = labelled(doc, agentSection, 'Instructions', `preference-${INSTRUCTIONS_FIELD}`, 'textarea');
+    // The single Agent-scoped box persists in `background` and reaches Agent requests in their
+    // frozen preferences. The official ChatGPT page never sees it.
+    const instructionsLabel = labelled(doc, agentSection, 'Instructions for Agent', `preference-${INSTRUCTIONS_FIELD}`, 'textarea');
     const instructions = instructionsLabel.querySelector('textarea') as HTMLTextAreaElement;
     instructions.rows = 4;
     instructions.maxLength = INSTRUCTIONS_MAX;
@@ -354,16 +334,14 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
   }
 
   /**
-   * Rows are the offerable families only: the pinned-catalog candidates, plus any runtime-reported
-   * offerable id and any offerable id the owner saved that neither source lists right now, so a saved
-   * Spark choice stays visible once seen. A stored id from an excluded family is not a row; it is
-   * carried through a save by `saveAllowedModels` and reported by `allowedModelIds`, never offered.
+   * Rows are pinned current models plus exact current ids the live runtime reports. Historic or
+   * unavailable stored ids have no row; `saveAllowedModels` carries them through without offering.
    */
   function syncModels(settings: WorkspaceSettings): void {
-    const allowed = new Set((settings.allowedModels ?? defaultAllowedModels()).map(model => model.id));
-    // A runtime-reported offerable id (a GPT-5.3 Spark model) joins the rows; an excluded family the
-    // runtime also reports never does, and a saved Spark id the runtime is not reporting right now
-    // stays visible so the owner's stored choice is not silently dropped.
+    const selectedModels = isDefaultAllowedModels(settings.allowedModels) ? defaultAllowedModels() : settings.allowedModels ?? defaultAllowedModels();
+    const allowed = new Set(selectedModels.map(model => model.id));
+    // GPT-6 Sol and Luna join only when the runtime reports their exact ids. Historic stored models
+    // remain in the settings record but do not become current choices.
     const wanted = modelChoices(settings.allowedModels, liveModels ?? []);
     const wantedIds = new Set(wanted.map(candidate => candidate.id));
     for (const [id, entry] of modelRows) if (!wantedIds.has(id)) { entry.row.remove(); modelRows.delete(id); }
@@ -523,7 +501,7 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
    * Stored names are kept where the id is unchanged, so a preserved unknown id keeps the label the
    * user last saw; catalog candidates use this module's derived label.
    *
-   * Rows are only the offerable families. Which stored ids must survive without a row is the core
+   * Rows are only the current models. Which stored ids must survive without a row is the core
    * rule (`unofferableAllowedModelIds`), not a local recomputation: the pane renders rows and hands
    * the checked ids back, and the policy decides what the record keeps. A carried id is never
    * offered and never sent; an id the owner actually unchecked does have a row and is removed.
@@ -540,7 +518,7 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
       ...(current.allowedModels ?? defaultAllowedModels()).map(model => [model.id, model.name] as const),
       ...modelChoices(current.allowedModels, liveModels ?? []).map(candidate => [candidate.id, candidate.name] as const),
     ]);
-    const carried = unofferableAllowedModelIds(current.allowedModels);
+    const carried = unofferableAllowedModelIds(current.allowedModels, liveModels ?? []);
     const allowedModels: AllowedModel[] = [...selected, ...carried].map(id => ({ id, name: names.get(id) ?? modelLabel(id) }));
     await commit(settings => ({ ...settings, allowedModels }), 'Allowed models saved.');
   }

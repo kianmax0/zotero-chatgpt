@@ -4,12 +4,23 @@ import { ConversationStore } from '../../packages/core/src/sessions/store.ts';
 import { MemoryStorage } from './doubles.ts';
 import { citationA, imageA, paperA, paperB, settings } from '../contracts/factories.ts';
 import type { ReaderSkill, SavedDraft, WorkspaceSettings } from '../../packages/contracts/src/workspace.ts';
-import { defaultSettings } from '../../packages/core/src/workspace/skills.ts';
+import { builtinSkills, defaultSettings, normalizeSkill } from '../../packages/core/src/workspace/skills.ts';
 import { defaultAllowedModels } from '../../packages/core/src/workspace/allowed-models.ts';
 import { documentA } from '../contracts/document-fixture.ts';
 import { documentSummary } from '../../packages/contracts/src/document.ts';
 import type { ActionTaskRecord } from '../../packages/contracts/src/tasks.ts';
 const clock = { uuid: () => '12345678-0000-4000-8000-000000000001', now: () => '2026-09-12T10:00:00.000Z' };
+function legacyAnnotateV1(enabled = true): ReaderSkill {
+  const latest = builtinSkills().find(skill => skill.id === 'builtin-annotate')!;
+  return {
+    ...latest, description: 'Propose and, after approval, add targeted native annotations.', version: '1.0.0', revision: 'builtin-annotate-1', enabled,
+    permissions: ['Preview native annotation candidates; write only after task approval.'],
+    markdown: `---\nname: annotate\ndescription: "Propose and, after approval, add targeted native annotations."\nversion: 1.0.0\nworkflow: annotate\n---\n\n# annotate\n\n## Input\nThe reading goal and an explicitly selected PDF scope.\n\n## Steps\n1. Choose relevant definitions, assumptions, derivations, evidence and limitations.\n2. Resolve exact quotations and native page coordinates; reject ambiguous locations.\n3. Present removable candidates, obtain task approval and record each native write.\n\n## Output\nReviewed native annotation candidates and a ledger of approved writes or failures.\n\n## Permissions\nPreview native annotation candidates; write only after task approval.\nSkill instructions describe a workflow and never grant additional permissions.\n`,
+  };
+}
+function registrySkill(skill: ReaderSkill): Omit<ReaderSkill, 'markdown'> {
+  return Object.fromEntries(Object.entries(skill).filter(([key]) => key !== 'markdown')) as Omit<ReaderSkill, 'markdown'>;
+}
 it('persists independent drafts and images without rewriting image bytes on every edit', async () => {
   const storage = new MemoryStorage(); const store = new WorkspaceStore(storage, clock);
   const saved = { schemaVersion: 1 as const, paper: paperA, conversationId: null, draft: { paper: paperA, question: 'First', citations: [citationA], images: [imageA], settings, references: [], skillId: null, profileId: null, overrides: {} }, scrollTop: 120, pageRange: [2, 3] as [number, number], updatedAt: clock.now() };
@@ -170,6 +181,39 @@ it('persists preferences, profiles and builtin availability across store instanc
   await store.saveSettings(value);
   expect(await new WorkspaceStore(storage, clock).settings()).toMatchObject({ preferences: { language: 'zh' }, uiLanguage: 'zh', textScale: 1.4, profiles: [{ id: 'apc' }] });
   expect((await store.settings()).skills.find(skill => skill.id === 'builtin-diagram')?.enabled).toBe(false);
+});
+
+it('migrates the exact saved annotate v1 definition to v1.1 while preserving its enabled state', async () => {
+  const storage = new MemoryStorage();
+  const defaults = defaultSettings();
+  const legacy = legacyAnnotateV1(false);
+  const normalized = await normalizeSkill(legacy);
+  expect(normalized).toMatchObject({ id: 'builtin-annotate', version: '1.1.0', revision: 'builtin-annotate-2', enabled: false });
+  expect(normalized.markdown).toContain('apply the validated native highlights and comments directly without a second approval');
+  expect(normalized.permissions).toContain('Apply validated native annotations directly after an explicit Agent annotation request; reject invalid or ambiguous source locations.');
+
+  // Settings registries store built-in metadata without Markdown. Seed the prior v1 metadata as a
+  // real saved settings file; loading should replace only the built-in definition and keep disabled.
+  const saved = {
+    ...defaults,
+    skills: defaults.skills.map(skill => registrySkill(skill.id === legacy.id ? legacy : skill)),
+  };
+  storage.files.set('workspace/settings.json', new TextEncoder().encode(JSON.stringify(saved)));
+  const loaded = await new WorkspaceStore(storage, clock).settings();
+  expect(loaded.skills.find(skill => skill.id === legacy.id)).toMatchObject({ version: '1.1.0', revision: 'builtin-annotate-2', enabled: false });
+  const persisted = JSON.parse(new TextDecoder().decode(storage.files.get('workspace/settings.json'))) as { skills: Array<{ id: string; version: string; revision: string; enabled: boolean }> };
+  expect(persisted.skills.find(skill => skill.id === legacy.id)).toMatchObject({ version: '1.1.0', revision: 'builtin-annotate-2', enabled: false });
+});
+
+it('rejects tampered built-in annotate definitions while accepting only the exact legacy v1 copy', async () => {
+  const legacy = legacyAnnotateV1();
+  await expect(normalizeSkill({ ...legacy, markdown: legacy.markdown.replace('obtain task approval', 'skip approval') })).rejects.toMatchObject({ code: 'REQUEST_CONFLICT' });
+  await expect(normalizeSkill({ ...legacy, permissions: ['Write arbitrary annotations without source validation.'] })).rejects.toMatchObject({ code: 'REQUEST_CONFLICT' });
+
+  const store = new WorkspaceStore(new MemoryStorage(), clock);
+  const settings = await store.settings();
+  const builtin = settings.skills.find(skill => skill.id === 'builtin-annotate')!;
+  await expect(store.saveSettings({ ...settings, skills: settings.skills.map(skill => skill.id === builtin.id ? { ...skill, markdown: skill.markdown + '\nTampered.' } : skill) })).rejects.toMatchObject({ code: 'REQUEST_CONFLICT' });
 });
 
 it('recomputes unsupported dependencies when an imported skill is edited or enabled', async () => {
@@ -404,15 +448,15 @@ it('resumes an interrupted inline migration without overwriting its already-crea
   expect(storedSettings(storage).skills.every(skill => !('markdown' in skill))).toBe(true);
 });
 
-it('persists the model allowlist through the real store so a new instance resolves the same allowed set', async () => {
+it('persists the current model allowlist through the real store and migrates absent settings', async () => {
   const storage = new MemoryStorage(); const store = new WorkspaceStore(storage, clock);
-  // A store that never touched the setting resolves the default 6 + 5.6 set.
+  // A store that never touched the setting resolves the three current GPT-6 models.
   expect((await store.settings()).allowedModels).toEqual(defaultAllowedModels());
   const value = await store.settings();
-  value.allowedModels = defaultAllowedModels().filter(model => model.id !== 'gpt-5.6-luna');
+  value.allowedModels = defaultAllowedModels().filter(model => model.id !== 'gpt-6-luna');
   await store.saveSettings(value);
   const reloaded = await new WorkspaceStore(storage, clock).settings();
-  expect(reloaded.allowedModels).toEqual([{ id: 'gpt-6-astra', name: 'GPT-6 Astra' }, { id: 'gpt-5.6-sol', name: 'GPT-5.6 Sol' }, { id: 'gpt-5.6-terra', name: 'GPT-5.6 Terra' }]);
+  expect(reloaded.allowedModels).toEqual([{ id: 'gpt-6-sol', name: 'GPT-6 Sol' }, { id: 'gpt-6-astra', name: 'GPT-6 Astra' }]);
   // A legacy record without the field loads as the default set and is migrated on read, like every
   // other additive settings field.
   const legacy = { ...defaultSettings() } as Partial<WorkspaceSettings>;
@@ -430,12 +474,12 @@ it('keeps an unknown or removed allowed model id without error and still resolve
   value.allowedModels = [...defaultAllowedModels(), { id: 'gpt-retired-x', name: 'GPT Retired X' }];
   await store.saveSettings(value);
   const reloaded = await new WorkspaceStore(storage, clock).settings();
-  expect(reloaded.allowedModels?.map(model => model.id)).toEqual(['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-retired-x']);
+  expect(reloaded.allowedModels?.map(model => model.id)).toEqual(['gpt-6-sol', 'gpt-6-astra', 'gpt-6-luna', 'gpt-retired-x']);
   expect(reloaded.allowedModels?.find(model => model.id === 'gpt-retired-x')?.name).toBe('GPT Retired X');
   // A repeated id is collapsed in order rather than making the whole settings record unreadable.
   value.allowedModels = [...defaultAllowedModels(), { id: 'gpt-retired-x', name: 'GPT Retired X' }, { id: 'gpt-retired-x', name: 'GPT Retired X' }];
   await store.saveSettings(value);
-  expect((await new WorkspaceStore(storage, clock).settings()).allowedModels?.map(model => model.id)).toEqual(['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-retired-x']);
+  expect((await new WorkspaceStore(storage, clock).settings()).allowedModels?.map(model => model.id)).toEqual(['gpt-6-sol', 'gpt-6-astra', 'gpt-6-luna', 'gpt-retired-x']);
 });
 
 it('refuses to persist an empty allowlist and leaves the stored record untouched', async () => {
