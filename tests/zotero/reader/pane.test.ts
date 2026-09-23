@@ -35,7 +35,7 @@ it('resizes the open dock from the keyboard through the layout controller and pe
     },
     Items: { get: () => ({ key: 'PDFONE01', libraryID: 1, getField: () => 'Synthetic paper' }) },
   } as unknown as ZoteroHost;
-  const pane = new NativeReaderPane(zotero, reader, 'codex-reader', new Set(), () => undefined);
+  const pane = new NativeReaderPane(zotero, reader, new Set(), () => undefined);
   await pane.controller.toggle();
   const dock = readerDoc.querySelector<HTMLElement>('[data-zchatgpt-dock]')!;
   const resizer = dock.querySelector<HTMLElement>('[data-zchatgpt-resizer]')!;
@@ -58,7 +58,7 @@ it('keeps chat ownership across tab switches and only closes for a native pane a
     itemID: 1, tabID: 'pdf-a', type: 'pdf', _window: win,
     zoomPageWidth() {}, zoomPageHeight() {}, zoomAuto() {}, navigate() {},
   };
-  const pane = new NativeReaderPane({ Prefs: { get: () => 'standard' } } as unknown as ZoteroHost, reader, 'codex', new Set(), () => undefined);
+  const pane = new NativeReaderPane({ Prefs: { get: () => 'standard' } } as unknown as ZoteroHost, reader, new Set(), () => undefined);
   const mount = vi.spyOn(pane, 'mountChat').mockResolvedValue(true);
   const unmount = vi.spyOn(pane, 'unmountChat');
   vi.spyOn(pane, 'captureDock').mockReturnValue({ collapsed: false, mode: 'item', scrollTop: 0, width: 280 });
@@ -86,7 +86,7 @@ it('treats a repeated or post-disposal close as a no-op', async () => {
     itemID: 1, tabID: 'pdf-a', type: 'pdf', _window: win,
     zoomPageWidth() {}, zoomPageHeight() {}, zoomAuto() {}, navigate() {},
   };
-  const pane = new NativeReaderPane({ Prefs: { get: () => 'standard' } } as unknown as ZoteroHost, reader, 'codex', new Set(), () => undefined);
+  const pane = new NativeReaderPane({ Prefs: { get: () => 'standard' } } as unknown as ZoteroHost, reader, new Set(), () => undefined);
   const capture = vi.spyOn(pane, 'capturePosition');
   const unmount = vi.spyOn(pane, 'unmountChat');
   const restore = vi.spyOn(pane, 'restoreDock').mockImplementation(() => {});
@@ -124,7 +124,7 @@ it('closes exactly once when the pane is disposed while the dock is still open',
     itemID: 1, tabID: 'pdf-a', type: 'pdf', _window: win,
     zoomPageWidth() {}, zoomPageHeight() {}, zoomAuto() {}, navigate() {},
   };
-  const pane = new NativeReaderPane({ Prefs: { get: () => 'standard' } } as unknown as ZoteroHost, reader, 'codex', new Set(), () => undefined);
+  const pane = new NativeReaderPane({ Prefs: { get: () => 'standard' } } as unknown as ZoteroHost, reader, new Set(), () => undefined);
   const capture = vi.spyOn(pane, 'capturePosition');
   const unmount = vi.spyOn(pane, 'unmountChat');
   vi.spyOn(pane, 'restoreDock').mockImplementation(() => {});
@@ -161,7 +161,7 @@ it('restores fixed scale across rapid reopen when Zotero ignores destination zoo
     // Zotero sets ignoreDestinationZoom=true, so navigation cannot change scale.
     navigate: ({ dest }) => { location.pageNumber = dest![0] + 1; },
   };
-  const pane = new NativeReaderPane({} as ZoteroHost, reader, 'codex', new Set(), () => undefined);
+  const pane = new NativeReaderPane({} as ZoteroHost, reader, new Set(), () => undefined);
   vi.spyOn(pane, 'captureDock').mockReturnValue({ collapsed: true, mode: 'item', scrollTop: 0, width: 280 });
   vi.spyOn(pane, 'restoreDock').mockImplementation(() => {});
   vi.spyOn(pane, 'mountChat').mockResolvedValue(true);
@@ -202,7 +202,7 @@ it('restores the current page without delayed link-navigation focus from the ope
     zoomPageWidth: () => { location.scale = 'page-width'; }, zoomPageHeight: () => {}, zoomAuto: () => {},
     navigate: ({ dest }) => { location.pageNumber = dest![0] + 1; textLayerFocus.push(() => { location.pageNumber = dest![0] + 1; }); },
   };
-  const pane = new NativeReaderPane({} as ZoteroHost, reader, 'codex', new Set(), () => undefined);
+  const pane = new NativeReaderPane({} as ZoteroHost, reader, new Set(), () => undefined);
   vi.spyOn(pane, 'captureDock').mockReturnValue({ collapsed: true, mode: 'item', scrollTop: 0, width: 280 });
   vi.spyOn(pane, 'restoreDock').mockImplementation(() => {});
   vi.spyOn(pane, 'mountChat').mockResolvedValue(true);
@@ -244,7 +244,7 @@ it('keeps the page a programmatic jump moved to while the viewer location still 
     zoomPageWidth: () => { location.scale = 'page-width'; }, zoomPageHeight: () => {}, zoomAuto: () => {},
     navigate: () => {},
   };
-  const pane = new NativeReaderPane({} as ZoteroHost, reader, 'codex', new Set(), () => undefined);
+  const pane = new NativeReaderPane({} as ZoteroHost, reader, new Set(), () => undefined);
   vi.spyOn(pane, 'captureDock').mockReturnValue({ collapsed: true, mode: 'item', scrollTop: 0, width: 280 });
   vi.spyOn(pane, 'restoreDock').mockImplementation(() => {});
   vi.spyOn(pane, 'mountChat').mockResolvedValue(true);

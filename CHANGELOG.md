@@ -97,6 +97,6 @@ Known limits (not yet verified): the new native Preferences pane in a real Zoter
 
 - Native Zotero 9 sidebar, selection actions, bundled Codex `0.144.1`.
 - Dedicated-host S1–S5 checks on macOS arm64; S6 virgin-profile AddonManager install without sending.
-- Known limits: ChatGPT Codex usage quota until 2026-09-15 blocks live answers; no public download; no Node-free install proof; Intel/Windows/Linux unsupported.
+- Known limits **at that preview**: ChatGPT Codex usage quota until 2026-09-15 blocked live answers; no public download; no Node-free install proof; Intel/Windows/Linux unsupported. Linux x86_64 support was added in `0.1.1` above; this historical note does not describe the current platform support.
 
 No GitHub Release exists for this tag.

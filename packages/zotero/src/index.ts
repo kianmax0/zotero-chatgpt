@@ -288,7 +288,7 @@ function entry(reader: HostReader): ReaderEntry {
   let current = readers.get(reader);
   if (!current) {
     const buttons = new Set<HTMLButtonElement>();
-    const pane = new NativeReaderPane(Zotero, reader, paneID, buttons, (body, identity, close, opened) => {
+    const pane = new NativeReaderPane(Zotero, reader, buttons, (body, identity, close, opened) => {
       const root = renderReaderShell(body, identity);
       const presenter = presenterFor(identity, reader);
       const hostedBinding = `${paperId(presenter.snapshot().document.paper)}:${reader.itemID}`;

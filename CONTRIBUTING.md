@@ -4,7 +4,7 @@ This is a community Zotero plugin. It is not affiliated with Zotero or OpenAI.
 
 ## Development
 
-Read [AGENTS.md](AGENTS.md), [architecture](docs/module-design.md), and the [macOS development guide](docs/development.md). Product behaviour is in [docs/zotero-chatgpt-user-flow.md](docs/zotero-chatgpt-user-flow.md); current state and evidence are in [docs/progress.md](docs/progress.md).
+Read [AGENTS.md](AGENTS.md), [architecture](docs/module-design.md), and the [development guide](docs/development.md). Product behaviour is in [docs/zotero-chatgpt-user-flow.md](docs/zotero-chatgpt-user-flow.md); current state and evidence are in [docs/progress.md](docs/progress.md).
 
 ```sh
 npm ci

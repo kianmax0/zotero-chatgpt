@@ -1,9 +1,22 @@
-# zotero-chatgpt：进度、当前候选与证据索引
+# zotero-chatgpt：进度与证据索引
 
 > 文档类型：证据和缺口，不是产品规格。更新日期：2026-09-23。
-> 下方新增本轮本地候选的实测记录。既有 §0–§7 保留 2026-09-20 及更早版本的发行、失败与验收归属，不自动继承到本轮。状态只用 PASS / FAIL / BLOCKED / NOT RUN。
+> 前四节记录 2026-09-23 的本地开发候选，后续保留有引用价值的发行、失败与验收历史；历史结果不自动继承到当前候选。已移除过期的“当前候选”快照和重复状态矩阵。状态只用 PASS / FAIL / BLOCKED / NOT RUN。
 
 产品要求见 [zotero-chatgpt-user-flow.md](zotero-chatgpt-user-flow.md)，架构见 [module-design.md](module-design.md)，命令与状态定义见 [development.md](development.md)。
+
+## 2026-09-23 仓库清理候选
+
+本轮从 `2125cea` 建立 `codex/repo-cleanup-20260923`。删除未接入生产装配的旧文库整理轮次实现 `packages/core/src/library/organization.ts` 及其专属测试；当前文库 Agent 的整理、请求恢复和对账由 `packages/core/src/library/session.ts` 与任务控制器承担。旧 `pending-library-organizations/` 记录只由被删除模块读取，此路径不再支持恢复。另去掉四个经 TypeScript 未使用诊断确认的参数或属性及其调用实参，未改变 Chat / Agent 产品边界、持久化格式或运行时 pin。
+
+删除与可靠高亮自动执行流程不一致、且已无产品文档引用的旧示意图两份；删去过期候选快照和重复状态汇总，保留历史 PASS/FAIL 结果及报告索引。修正运行时 pin 注释和 Linux 支持的历史措辞。
+
+| 层级 | 状态 | 本轮证据与边界 |
+| --- | --- | --- |
+| 静态与单元 | PASS | `npm run typecheck`、`npm run lint`、`npm run test:unit -- --maxWorkers=1`：114 files / 1509 tests / 0 skipped。删除前基线为 115 files / 1517 tests；减少的 8 项仅属于已删除的孤立模块测试。额外 `tsc --noEmit --noUnusedLocals --noUnusedParameters` PASS。 |
+| 打包与产物 | PASS | `npm run package:dev`、`npm run verify:artifacts`：87 files；`dist/zotero-chatgpt-0.1.1-dev.xpi` 为 99,599,253 bytes，SHA-256 `e3216ba5d519ab93986b0d935fbb0158a70b1c213e842c504a2127d9a5f2a7d8`。 |
+| 真实 Zotero、网页与 Codex 服务 | NOT RUN | 本轮仅删孤立路径与未用参数，未启动宿主或发起模型请求；此前宿主与服务结果仍绑定各自旧产物。 |
+| 本地忽略产物 | PASS | 核对没有使用本仓库专用树的活动进程后，精确移除 `.zotero-chatgpt-dev/` 内 161 个大于 20 MB 的重复 Codex 可执行文件及 XPI 副本，合计 23,321,301,264 bytes，并删除 `dist/` 中旧 0.1.0 XPI 副本；保留当前 `runtime-cache/`、profile 认证与配置文件以及 JSON 报告。这项本地磁盘清理不属于 Git/XPI。 |
 
 ## 2026-09-23 主窗口统一与真实论文演示候选
 
@@ -126,40 +139,24 @@ S6 两版本阶段用 `--upgrade-xpi dist/zotero-chatgpt-0.4.0a34-dev.xpi --roll
 
 审查：自审 PASS（实际 diff、域名和文献桥边界、无无关修改、`git diff --check`）；独立审查 NOT RUN。用户手动报告的 Chat 登录成功与自动测试分开记载，不外推为其它账户、认证流程或平台均可用。测试期间曾出现网页连接失败和菜单缺失，原因未完成诊断；不将这些问题声称为本次改动修复，也不绕过认证服务限制。
 
-## 1. 当前候选（开发线）
-
-| 字段 | 值 |
-| --- | --- |
-| 插件 ID | `{90909501-7b5b-4985-9f55-566e9890746c}` |
-| Zotero manifest 版本 | `0.4.0a34`（名称 "Zotero ChatGPT (Development)"） |
-| 候选 XPI | `dist/zotero-chatgpt-0.4.0a34-dev.xpi` |
-| SHA-256 | `5c9ed57cb3e7269a9e64e604236cf5823afd3defbfe58f437b3fc96e653e55fa` |
-| 大小 / 文件数 | 92,760,769 bytes / 87 files（`dist/SHA256SUMS` 同源） |
-| 随包 Codex | 0.154.0 darwin/arm64；archive `344310a0…f9d7`，binary `4f859826…afcc` |
-| 构建工具链 | Node 24.11.0 / npm 11.6.1（`.nvmrc`、`engines >=24 <25`） |
-| 记录平台 | macOS Apple Silicon / Zotero 9.0.6 |
-| 发行性质 | 本地开发 XPI；未签名，无公开下载地址，无更新频道 |
-
-add-on 版本未变但产物被重建过多次，因此**旧 hash 不再标识当前文件**。历史值：`5447f338…`（a33）、`c5665975…`（09-19 UI 轮 a34）、`22afde95…`（09-20 精修轮 a34，文件曾为 92,760,986 bytes）。当前文件以 §2.2 与本节数值为准。
-
-## 2. 2026-09-20 发布前整备轮
+## 1. 2026-09-20 发布前整备轮
 
 本轮范围：结构勘察、有证据的清理、缺陷修复、文档归位、构建与发行核查、离线回归、可用的宿主检查与自审。**没有**调用产品 Codex、没有试探额度、没有运行真实模型或原生动作验收。
 
-### 2.1 代码与仓库改动
+### 1.1 代码与仓库改动
 
 | 类型 | 内容 |
 | --- | --- |
 | 缺陷修复 | `chat/embed.ts` 的宿主页轮询定时器在 `hide()` 时没有停止：切换到 Agent 或关闭侧栏后，每个已创建 surface 仍每 500 ms 唤醒窗口（`tick → sync/probeBridge/trackConversation`），直到 surface 被驱逐或销毁；原注释“nothing painted 就停”与实现不符。现在 `hide()` 停止轮询、`show()` 重新启动，并有回归断言 `clearInterval` 收到该 handle。 |
-| 缺陷修复 | `tests/host/context-driver.js` 有 5 处断言在“共同外壳 + 单行工具栏 + UI-05/06 文案”改造后仍按旧结构读取（3 处作用域 + 2 处文案），导致无模型宿主阶段在第 18 项即中止，之后的 29 项从未执行。详见 §2.4。 |
+| 缺陷修复 | `tests/host/context-driver.js` 有 5 处断言在“共同外壳 + 单行工具栏 + UI-05/06 文案”改造后仍按旧结构读取（3 处作用域 + 2 处文案），导致无模型宿主阶段在第 18 项即中止，之后的 29 项从未执行。详见 §1.4。 |
 | 清理 | 删除无消费者的导出 `OFFICIAL_CHATGPT_ORIGIN`、`PAPER_CONTEXT_FIELDS`、`readerRevision`（含其唯一 import）、actor 内未使用的 `CHATGPT_ORIGIN`。 |
 | 清理 | 删除死分支：`packages/zotero/src/index.ts` 的 `CHAT_TRANSPORT` 常量恒为 `undefined`，其两个条件表达式永不成立；改为直接返回既有 `CHAT_TRANSPORT_UNAVAILABLE_MESSAGE`，并保留“本构建不接原生 Chat transport”的说明。 |
 | 清理 | 删除无引用的样式规则 `.zchatgpt-context-consent`（真正的首次外发同意控件使用 `zchatgpt-embed-notice` / `zchatgpt-embed-context-notice`）。 |
-| 清理 | 从 `docs/` 删除三份一次性执行工单（`zotero-chatgpt-ui-redesign-instruction.md`、`zotero-chatgpt-ui-polish-instruction.md`、`zotero-chatgpt-release-readiness-instruction.md`）。其有效结论已在本文件 §5 与四份主文档中；原文在 git 历史（commit `7bbc9ca`）可完整恢复。 |
+| 清理 | 从 `docs/` 删除三份一次性执行工单（`zotero-chatgpt-ui-redesign-instruction.md`、`zotero-chatgpt-ui-polish-instruction.md`、`zotero-chatgpt-release-readiness-instruction.md`）。其有效结论已迁入四份主文档；原文在 git 历史（commit `7bbc9ca`）可完整恢复。 |
 
 保留：`copyableAnswerText()` 虽当前是 identity，但它标注“剪贴板载荷 = 原始 Markdown”这一契约边界，非空 wrapper，故不删。`canonical/equal`、`bytes`、`waitRead` 等跨层重复是分层约束（`core` 不依赖 `packages/zotero`）或不足两行的局部工具，不为消重新增公共 utils 层。
 
-### 2.2 本地门禁（工作树，2026-09-20）
+### 1.2 本地门禁（工作树，2026-09-20）
 
 | 命令 | 结果 |
 | --- | --- |
@@ -169,7 +166,7 @@ add-on 版本未变但产物被重建过多次，因此**旧 hash 不再标识�
 | `npm run package:dev` | PASS，构建 `dist/zotero-chatgpt-0.4.0a34-dev.xpi`（92,760,769 bytes） |
 | `npm run verify:artifacts` | PASS，87 files；SHA-256 `5c9ed57cb3e7269a9e64e604236cf5823afd3defbfe58f437b3fc96e653e55fa` |
 
-### 2.3 干净输入重建（可复现）
+### 1.3 干净输入重建（可复现）
 
 在不含 `node_modules` / `.git` / `dist` / `build` / 专用 profile 的临时副本中，只复制当前受检源码、lockfile 与固定运行资产（pinned Codex binary），执行 `npm ci --prefer-offline` → `typecheck` → `lint` → `package:dev` → `verify:artifacts` → `test:unit`：
 
@@ -177,7 +174,7 @@ add-on 版本未变但产物被重建过多次，因此**旧 hash 不再标识�
 - 测试：103 files / 1379 tests / 0 skipped（打包后再跑，`tests/build` 中依赖 `dist/` 的两个 `skipIf` 用例确实执行）。
 - 结论：打包是确定性的（固定 1980 时间戳、文件排序），不依赖旧 `dist/`、缓存或本机偶然文件。
 
-### 2.4 无模型宿主阶段（当前候选，PASS 47/47）
+### 1.4 无模型宿主阶段（0.4.0a34 历史产物，PASS 47/47）
 
 专用隔离树 `.zotero-chatgpt-dev/context-runs/readiness-20260920d/`，`node scripts/prepare-host-test.mjs --context --run-id readiness-20260920d` 后用 `-no-remote -profile … -datadir …` 启动 Zotero 9.0.6（1000×600，DPR 2），只停止本任务自己启动且参数匹配的进程。
 
@@ -192,15 +189,15 @@ add-on 版本未变但产物被重建过多次，因此**旧 hash 不再标识�
 | `readiness-20260920` | FAIL（18 项后中止） | `new-chat-tab-before-or-with-connection` 用 `panel()`（`[data-zchatgpt-chat]`）查找标题 tab，但 tab 条已属于共同外壳；`panel()` 不再包含头部。 |
 | `readiness-20260920b` | FAIL（同项） | 作用域修正后找到 tab，但断言只接受 `New chat`／`新建对话`；该处已切到 Agent，产品按 UI-05 显示 `New agent`。 |
 | `readiness-20260920c` | FAIL（43/44） | `pref-pane-copy-matches-stored-ui-language` 的 section 文案表只列出 `Chat`／`Appearance`，而 UI-06 重组后界面语言控件位于 `General`（zh `通用`）。 |
-| `readiness-20260920d` | **PASS 47/47** | 修正上述作用域与文案后，宿主阶段首次完整跑通当前候选。 |
+| `readiness-20260920d` | **PASS 47/47** | 修正上述作用域与文案后，宿主阶段首次完整跑通当时的 0.4.0a34 产物。 |
 
 同一处作用域问题还影响 `contextSource`（活动引文行位于 `More → Paper & context details`）与性能循环里的 history 按钮（属外壳 `actions`），一并按元素实际归属改为 `shell()`。
 
-### 2.5 独立审查
+### 1.5 独立审查
 
 在实现完成后、冻结产物前，用工作区既有的 CodeRabbit CLI（`coderabbit review --agent --uncommitted -c AGENTS.md`）对本轮未提交 diff 做了独立审查，未新增 Codex 用量。结果：1 条 minor（`CHANGELOG.md` 把驱动断言数写成 four，实际为 five），已修正；代码与测试文件无其他发现。该审查只覆盖源码/文档 diff，不替代真实宿主与真实服务验证。
 
-### 2.6 本轮未运行
+### 1.6 本轮未运行
 
 ```text
 真实 ChatGPT 提交 / 文件粘贴、真实 Codex 模型轮次、高亮 / 获取 / 整理原生任务、
@@ -212,68 +209,16 @@ add-on 版本未变但产物被重建过多次，因此**旧 hash 不再标识�
       属性/几何，但没有产出新截图；可用浏览器工具拒绝 file:// 且无法访问本机回环预览服务，
       因此没有把旧截图当作当前候选的证据。
 远端 CI、跨平台与非 darwin-arm64 运行：NOT RUN。本轮未 push（未获授权），只验证了本地等价命令。
-边界：§2.2–§2.4 的 PASS 只覆盖离线门禁、确定性打包与无模型宿主阶段；不等于真实服务或原生动作通过。
+边界：§1.2–§1.4 的 PASS 只覆盖离线门禁、确定性打包与无模型宿主阶段；不等于真实服务或原生动作通过。
 Codex 用量：本轮未调用产品 Codex，属“未发起”，不是“已实测为零”。
 ```
 
-## 3. 当前阻塞与剩余必需验证
-
-| 优先级 | 项 | 状态 |
-| --- | --- | --- |
-| P0 | Agent 真实链路（高亮、整理、获取的元数据 + PDF 两阶段）在**当前候选**上复验 | BLOCKED：`0.4.0a34` 未跑真实模型；沿用 a32 的额度阻塞记录，不能继承 a30 的 PASS |
-| P0 | 真实网页 Chat 提问 / 恢复 / 停止在**当前候选**上复验 | NOT RUN：a33 的 web-live PASS 绑定旧产物，不自动继承 |
-| P1 | UI-01 至 UI-07 的宿主**视觉**复核（浅深主题、IME、焦点环、多窗口） | 部分覆盖：本轮宿主阶段已验单行头部、两个复制按钮、模式往返、性能与 Preferences 语言切换；截图级视觉与多窗口仍 NOT RUN |
-| P1 | 安装 / 升级 / 回退（专用 profile） | NOT RUN；本轮未安装到任何 profile |
-| P1 | Sidebar 删除 → 已打开 Preferences 的推送 | 未闭合：面板沙箱未暴露跨 compartment 回调，现以“窗口重新聚焦时重读”兜底 |
-| P2 | 公开分发材料（签名、许可复核、公开下载、更新频道、支持平台声明） | BLOCKED：本轮未获授权，且 `manifest.json` 的 `update_url` 仍指向 `.invalid` 占位 |
-| P2 | 非 darwin-arm64 平台 | NOT RUN / 未支持声明：随包 Codex 是 darwin/arm64 |
-
-## 4. 分场景证据矩阵（历史 + 当前轮）
-
-同一报告含多项结果时拆行；不把服务未跑写成产品通过。当前轮的层级见 §2。
-
-| 场景 | 自动 / 本地 | 真实服务与最终产物 | 未覆盖 |
-| --- | --- | --- | --- |
-| 干净安装、无系统 Node | 原记录 PASS | a33 install 46/46；0 请求 | 其它平台、公开发行安装 |
-| Chat 冷启动不触发 Codex | 原记录 PASS | a33 web 记录 Codex 0→0；**当前轮宿主 PASS**（未准备/未启动运行时） | 已有 Agent 在途时的混合场景 |
-| Agent 故障不阻断 Chat | 原表 PASS | 主要证明正常 Chat 的 Codex 0→0 | 未登录 / 缺资产 / 额度不足的故障注入 |
-| PDF A/B、同名附件与切换草稿 | 原记录宿主 PASS | 真实服务多窗口 NOT RUN | 最终包的多窗口服务绑定 |
-| 模式切换状态 | 原记录 clean host PASS | 主要为 Chat 不触发 Codex | 真实草稿 / focus / IME / 在途任务 |
-| Agent 高亮与整理 | 原记录自动 / 原生宿主 PASS | a30 真模型 PASS；a33、当前候选 NOT RUN | 当前最终包真实模型 |
-| 原生标注与整理撤销 | a33 native 子集 PASS | 合成候选，无模型调用 | 不能当完整真实模型流程 |
-| 停止生成 | 原记录 PASS | a33 web resume-stop PASS | 其它恢复场景 |
-| 有界第二次提交 | 单元回归 PASS | 真实 attempts 均为 1 | 第二次尝试分支未触发 |
-| Settings ↔ History 删除同步 | 离线集成回归 PASS（真实 `ConversationStore` + `WorkspaceStore` + 独立 presenter） | — | 真实多窗口；Sidebar → Preferences 无推送 |
-| 单行头部 / 两个复制动作 | 离线回归 PASS | **当前候选宿主 PASS**（`single-row-common-header-with-the-two-paper-actions`） | 截图级视觉、放大字号与多窗口 |
-| 当前候选 XPI 干净重建 | PASS（逐字节相同 SHA） | — | 远端 CI 未运行 |
-
-## 5. UI 轮次摘要（2026-09-19 / 09-20，已被源码与离线回归覆盖）
-
-两轮均已完成源码改造、离线回归、浏览器（Blink）渲染复查与开发 XPI 打包；真实宿主验收当时未运行。
-
-| 主题 | 落地结果 |
-| --- | --- |
-| UI-01 共同外壳 | 单一 `.zchatgpt-shell`；模式开关只在 `.zchatgpt-chrome` 内创建一次，切换不移动、无第二套开关 |
-| UI-02 紧凑顶部 | 正常态只有一行 44 px 工具栏；上下文摘要、自动 PDF 状态、宿主重新加载收进 `More`；文献快捷动作只有 `Copy paper context` 与 `Copy PDF file` 两个图标按钮（32×32 命中区、18 px 图标、可键盘聚焦） |
-| UI-03 四种事实分层 | 摘要回答“下一次发送什么”；本地提取、待发送范围、页面接受、回答分开表达；详情面板展示来源全名、下次发送、本地读取、自动 PDF 状态 |
-| UI-04 文件与文本分开 | `Copy PDF file` 只报告“已复制到剪贴板，需粘贴”，不冒充附件上传；`Copy selection` 不再是工具栏动作 |
-| UI-05 切换保持状态 | 模式各自保留草稿/焦点/滚动；Agent 空状态说明真实可用性；禁用给原因；Enter / Shift+Enter 与 IME 规则；空会话名为 `New agent` |
-| UI-06 设置作用范围 | Preferences 重组为 General / Chat / Agent / 本地数据；`Agent text size`、`Agent instructions`（注明仅 Agent）；原始 model id/版本进 `Details` |
-| UI-07 历史与删除 | 历史行 = 标题 + 文献/最近活动/可证明来源；Preferences 的 `Chat history` 改名 `Local data` 并说明删除范围 |
-| 复制契约（P-04/05/08） | `core/src/chat/paper-context.ts` 只输出 Title / Authors / Publication / Year / DOI + Abstract，缺失省略，与自动发送的 `documentBrief()` 不共用格式器 |
-| 两个动作独立（P-06） | 无可证明书目身份时禁用书目复制并说明原因，文件复制仍可用；反之亦然 |
-| 冻结来源（P-07） | `exportPaperContext()` 在 await 前 clone `PaperScope`，按该冻结 scope 读取 |
-| 历史删除同步（H-01/02/04/05/06） | `WorkspaceStore.removeConversation` 提交后发布 `HistoryChange`；`ReaderWorkspace.subscribeHistory?` 为可选契约；删除递增查询世代丢弃迟到 list/search；`ConversationStore.save` 写前重查文件，已删会话抛 `NOT_FOUND`，仅 `create` 能重建；删除同时丢弃草稿/位置/防抖保存与焦点归位 |
-| 交付后修复（10.6 类） | reader 文档内联样式表改为与当前 bundle 比较后**原地重写**；工具栏说明元素自带内联隐藏声明，旧样式表下也不会打印成长串文字 |
-
-历史上报的关键数值（已过期，仅作归属）：typecheck/lint PASS；unit 100 files / 1344 tests（UI 轮）→ 103 files / 1378 tests（精修轮）；a34 曾为 92,732,302 bytes / `c5665975…` 与 92,760,986 bytes / `22afde95…`。
-
-## 6. 历史报告索引（证据路径，不复制正文）
+## 历史报告索引（证据路径，不复制正文）
 
 | 证据 | 原始结果 | 覆盖范围 |
 | --- | --- | --- |
-| `.zotero-chatgpt-dev/context-runs/readiness-20260920{,b,c}/host-report.json` | FAIL（见 §2.4） | 驱动作用域/文案缺陷的复现记录，保留不覆盖 |
-| `.zotero-chatgpt-dev/context-runs/readiness-20260920d/host-report.json` | **PASS 47/47** | 当前候选无模型宿主阶段 |
+| `.zotero-chatgpt-dev/context-runs/readiness-20260920{,b,c}/host-report.json` | FAIL（见 §1.4） | 驱动作用域/文案缺陷的复现记录，保留不覆盖 |
+| `.zotero-chatgpt-dev/context-runs/readiness-20260920d/host-report.json` | **PASS 47/47** | 0.4.0a34 历史产物无模型宿主阶段 |
 | `a33-{typecheck,lint,unit,package,artifacts}.log` | PASS（原记录） | 100 files / 1336 tests / 0 skipped；87-file XPI |
 | `9374ac8…/final-status.txt` | PASS（原记录） | detached worktree 在版本 commit 上重建相同 SHA |
 | `final-a33-install-PASS.json` | PASS（原记录） | a33 XPI 46/46，PATH 无 Node，0 请求 |
@@ -289,7 +234,7 @@ Codex 用量：本轮未调用产品 Codex，属“未发起”，不是“已�
 | `.zotero-chatgpt-dev/verification/delivery-20260919/acceptance-current.json` | 原文档记录的机器可读摘要；本轮未读取 | — |
 | `.zotero-chatgpt-dev/ui-preview/screenshots/ui-polish-*.png` | 浏览器（Blink）渲染复查，非 Zotero/Gecko | 单行头部、窄窗、深浅主题、复制反馈、History 菜单、说明文字隐藏复现 |
 
-## 7. 原 a33 基线（原始记录，不代表当前候选）
+## 原 a33 基线（原始记录，不代表当前候选）
 
 | 字段 | 原记录 |
 | --- | --- |

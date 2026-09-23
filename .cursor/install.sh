@@ -40,7 +40,7 @@ fi
 # Deterministic dependency install from package-lock.json.
 npm ci
 
-# Fetch + verify the pinned Codex 0.154.0 archive into the ignored .zotero-chatgpt-dev/runtime-cache/.
+# Fetch + verify the pinned Codex 0.156.1 archive into the ignored .zotero-chatgpt-dev/runtime-cache/.
 # This is idempotent: it skips the download when the archive is already present and its
 # SHA-256 matches runtime/manifest.ts. Required by `npm run package:dev`.
 node scripts/runtime-prepare.mjs

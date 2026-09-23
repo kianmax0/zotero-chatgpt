@@ -99,7 +99,7 @@ it('opens NativeReaderPane chat in the reader iframe column and hides the ItemPa
     Prefs: { get: (key: string) => key === 'layout' ? 'standard' : 360, set() {} },
     Items: { get: () => ({ key: 'PDFONE01', libraryID: 1, getField: () => 'Synthetic paper' }) },
   } as unknown as ZoteroHost;
-  const pane = new NativeReaderPane(zotero, reader, 'codex-reader', new Set(), (body, identity) => { renderReaderShell(body, identity); });
+  const pane = new NativeReaderPane(zotero, reader, new Set(), (body, identity) => { renderReaderShell(body, identity); });
   await pane.controller.toggle();
   const dock = readerDoc.querySelector('[data-zchatgpt-dock]');
   const sidebar = readerDoc.querySelector('[data-zchatgpt-sidebar]');
