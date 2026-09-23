@@ -5,6 +5,21 @@
 
 产品要求见 [zotero-chatgpt-user-flow.md](zotero-chatgpt-user-flow.md)，架构见 [module-design.md](module-design.md)，命令与状态定义见 [development.md](development.md)。
 
+## 2026-09-23 主窗口统一与真实论文演示候选
+
+本节绑定当前开发 XPI `188caffcd4138ae5ea6db4b4ebcb8ddfc076cbb4ac9ad28c6e917c3a9c5d623b`（99,599,288 bytes / 87 files）。主窗口入口紧邻搜索，默认 Chat；未选文献只显示简短提示，切到 Agent 后使用与 Reader 同一套对话外壳。窄窗堆叠和分隔条保留 Zotero 原生详情栏；Agent 起步区压缩为四个简短操作。当前 PDF、文库 Chat 上下文和设置文字已精简，主窗口 Chat 明示外发范围及 PDF 正文不随附。Agent 仍支持自然语言、`/skill`、`@` 文献/集合、主题发现、受控获取、整理、元数据补全、笔记、集合与 Figure 圈画；所有写入保留各自预览/批准和原生读回，可靠高亮按用户本次请求自动执行。
+
+| 层级 | 状态 | 当前证据与边界 |
+| --- | --- | --- |
+| 静态与单元 | PASS | `npm run typecheck`、`npm run lint`、`npm run test:unit -- --maxWorkers=1`：115 files / **1517 tests** / 0 skipped；`npm run package:dev`、`npm run verify:artifacts`：87 files。包含主窗口 Chat 首次打开不加载 Agent、发送时冻结选中项、闲置网页重绑、未授权或否定的自然语言写入拒绝、Figure 单飞及输出矩形导航回归。 |
+| 真实 Zotero 无模型宿主 | NOT RUN | 最近的 `.zotero-chatgpt-dev/context-runs/library-agent-compact-final-20260923-2010/host-report.json` 是较早 XPI `ba3b3105…` 的 **55/55 PASS**，包含主窗口默认 Chat、原生详情栏保留、分隔条、Reader 进入自动收起和 Chat/Agent 隔离；当前 XPI 只补写入意图拒绝，尚未重跑宿主。 |
+| 视觉检查 | NOT RUN | 较早 XPI `b3c088a3…` 的 Zotero 1000×600 窄窗截图 `.zotero-chatgpt-dev/context-runs/library-visual-review-20260923-1934/main-chat-default.png` 与 `.zotero-chatgpt-dev/context-runs/library-agent-visual-20260923-1940/main-agent.png` 显示主窗口无文字重叠、原生详情栏可见；后续四按钮精简产物的有效截图未取得，不能继承该视觉 PASS。深色主题和较大字号也未测。 |
+| 当前 XPI 的 Sol 原生高亮与整理 | BLOCKED | 较早 XPI `ba3b3105…` 的 `.zotero-chatgpt-dev/context-runs/library-agent-visual-20260923-1625/host-live-final-ba3-sol-core-20260923.json` 在 `official-agent-login` 处停止，**0 次新模型轮次**；需用户在专用 profile 本人重新登录，当前 XPI 尚无新模型请求。更早 XPI `af5d6bd7…` 的真实 Sol 报告 `host-live-sol-live-after-picker-20260923.json` 已完成可靠高亮自动写入/读回/撤销与选中项整理批准/读回/冲突撤销，旧结果不继承为当前产物 PASS。 |
+| 经典论文 GIF | PASS | [真实录屏](media/agent-classic-paper-demo.gif) 使用公开论文 *Attention Is All You Need*、同一专用 profile 和较早 XPI `af5d6bd7…`。一个 `gpt-6-sol` 轮次完成，任务账本记载 3/3 原生高亮自动写入；GIF 显示其中一条和任务卡。来源、剪辑与局限见 [media/sources.md](media/sources.md)。 |
+| Figure 与主窗口 Chat 完整真实链路 | NOT RUN | Figure 合成候选的 Zotero 原生写入/读回/精确撤销在较早候选 `.zotero-chatgpt-dev/context-runs/library-agent-native-final-20260923-1720/host-report.json` **20/20**；当前 XPI 上从真实 Sol 裁图到用户批准和原生结果尚未跑完。主窗口 Chat 的官方网页真实提交与自动上下文接收也尚未验证，不能把 mock 或 UI 状态当作远端回答。 |
+
+失败及旧产物报告保留在各自 run-id 目录；上表不覆盖以下历史记录。当前分支仅开发候选，尚未公开 Release 或安装到日常 profile。
+
 ## 2026-09-23 反馈修订候选（草稿 PR 后续）
 
 本轮针对用户在真实 Zotero 截图中反馈的模型设置、主窗口入口/面板和高亮流程继续修订；基线是下节的 `e0baff9f…` 候选。本节只记录新构建和本轮实测，不继承下节真实获取示例的产物身份。正式 Agent 默认 Sol，Astra/Luna 仍可手动选；Sol/Luna 强制门禁只用于节省真实模型测试用量。

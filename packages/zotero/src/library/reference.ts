@@ -1,7 +1,7 @@
 import { ReaderError, paperId, type DocumentContext, type DocumentRevision, type ImageAttachment, type PaperIdentity, type PaperScope, type Rect } from '../../../contracts/src/index.ts';
 import { clone } from '../../../contracts/src/clone.ts';
 import type { NativeCollectionTarget } from '../../../contracts/src/native.ts';
-import type { LibraryReferencePort, ReaderReference } from '../../../contracts/src/workspace.ts';
+import type { FigureRegionSelection, LibraryReferencePort, ReaderReference } from '../../../contracts/src/workspace.ts';
 import { paperIdentityOf, type PaperMetadata } from '../../../core/src/context/bibliography.ts';
 import { nativeDocumentSource, type DocumentSource, type ReaderDocumentCache } from '../reader/document.ts';
 import type { HostReader, ZoteroHost } from '../reader/host-types.ts';
@@ -63,6 +63,7 @@ export interface LibraryReferenceOptions extends NativeFileOptions {
 }
 export interface NativeLibraryReferencePort extends LibraryReferencePort {
   capturePage(paper: PaperScope, pageIndex: number, signal?: AbortSignal): Promise<ImageAttachment>;
+  captureRegion(selection: FigureRegionSelection, signal?: AbortSignal): Promise<ImageAttachment>;
   collections(): Promise<Array<NativeCollectionTarget & { name: string }>>;
 }
 
@@ -227,6 +228,13 @@ export function createLibraryReferencePort(zotero: unknown, options: LibraryRefe
       return files.image(bytes, `${scope.attachmentKey} - p.${pageIndex + 1}.png`, { kind: 'paper', paper: scope, pageIndex, revision });
     }), 'The native PDF image could not be rendered. This reader may not support page capture.');
   };
+  const captureRegion = (selection: FigureRegionSelection, signal = new AbortController().signal) => {
+    if (!selection || !Array.isArray(selection.rect) || selection.rect.length !== 4 || !selection.rect.every(Number.isFinite)) fail('Select a valid rectangle inside one PDF page.');
+    const [x1, y1, x2, y2] = selection.rect;
+    if (!(x2 > x1 && y2 > y1) || Math.max(Math.abs(x1), Math.abs(y1), Math.abs(x2), Math.abs(y2)) >= 1_000_000) fail('Select a valid rectangle inside one PDF page.');
+    if (!selection.revision || typeof selection.revision.fingerprint !== 'string' || !selection.revision.fingerprint || !Number.isSafeInteger(selection.revision.size) || selection.revision.size < 0 || !Number.isFinite(selection.revision.modifiedAt)) fail('Capture a current PDF revision before selecting a figure.');
+    return capture(selection.paper, selection.pageIndex, [...selection.rect] as Rect, { ...selection.revision }, signal);
+  };
   return {
     ...(options.getWindow ? { selectedItems: () => captureSelectedLibraryItems({ clientId: options.clientId, getWindow: () => options.getWindow!(), reader: nativeReader }) } : {}),
     collections: () => boundary(async () => {
@@ -302,6 +310,7 @@ export function createLibraryReferencePort(zotero: unknown, options: LibraryRefe
     },
     open: paper => boundary(async () => { const scope = scopeOf(paper); await z.Reader.open(attachment(scope).id); }, 'The referenced PDF could not be opened.'),
     capturePage: (paper, pageIndex, signal) => capture(paper, pageIndex, undefined, undefined, signal),
+    captureRegion,
   };
 }
 

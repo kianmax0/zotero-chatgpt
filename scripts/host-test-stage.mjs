@@ -34,6 +34,16 @@ function readRunId(argv) {
   if (!/^[a-z0-9][a-z0-9-]{0,63}$/u.test(value)) throw new Error('--run-id must be a safe lowercase identifier');
   return value;
 }
+function readReuseId(argv) {
+  const value = readOption(argv, '--reuse-run-id');
+  if (value && !/^[a-z0-9][a-z0-9-]{0,63}$/u.test(value)) throw new Error('--reuse-run-id must name one dedicated context-runs profile');
+  return value;
+}
+function readReportId(argv) {
+  const value = readOption(argv, '--report-id');
+  if (value && !/^[a-z0-9][a-z0-9-]{0,63}$/u.test(value)) throw new Error('--report-id must be a safe lowercase identifier');
+  return value;
+}
 
 function readLoginWaitSeconds(argv) {
   const positions = argv.flatMap((value, index) => value === '--login-wait-seconds' ? [index] : []);
@@ -54,6 +64,8 @@ export function selectHostStage(argv) {
   const acceptance = argv.includes('--acceptance');
   const selected = EXCLUSIVE.filter(name => argv.includes(`--${name}`));
   const runId = readRunId(argv);
+  const reuseId = readReuseId(argv);
+  const reportId = readReportId(argv);
   const liveCoreFlows = argv.includes('--live-core-flows');
   const liveCoreStage = selected.length === 1 && selected[0] === 'live-core';
   const recoverOrganization = selected.length === 1 && selected[0] === 'recover-organization';
@@ -62,6 +74,10 @@ export function selectHostStage(argv) {
   const loginWaitSeconds = readLoginWaitSeconds(argv);
   if (runId && (selected.length !== 1 || selected[0] !== 'context')) throw new Error('--run-id requires --context');
   if (runId && argv.includes('--live')) throw new Error('--run-id cannot be combined with --live');
+  const reusableLive = selected.length === 1 && (selected[0] === 'live-core' || (selected[0] === 'context' && argv.includes('--live') && liveCoreFlows));
+  if (reuseId && (runId || !reusableLive || !reportId))
+    throw new Error('--reuse-run-id requires --live-core or --context --live --live-core-flows and a unique --report-id, without --run-id');
+  if (reportId && !reuseId) throw new Error('--report-id requires --reuse-run-id');
   if (liveCoreFlows && (selected.length !== 1 || selected[0] !== 'context' || !argv.includes('--live'))) throw new Error('--live-core-flows requires --context --live');
   if (loginWaitSeconds !== undefined && !liveCoreFlows && !liveCoreStage) throw new Error('--login-wait-seconds requires --live-core-flows or --live-core');
   if (webLive && (selected.length !== 1 || selected[0] !== 'embed')) throw new Error('--web-live requires --embed');
@@ -101,15 +117,18 @@ export function selectHostTree(argv, repositoryRoot) {
   const dev = join(repositoryRoot, '.zotero-chatgpt-dev');
   if (stage === 'context' || stage === 'live-core' || stage === 'recover-organization') {
     const runId = readRunId(argv);
+    const reuseId = readReuseId(argv);
+    const reportId = readReportId(argv);
     if (['live-core', 'recover-organization'].includes(stage) && runId) throw new Error(`--${stage} reuses the preserved context profile and does not accept --run-id`);
-    const contextRoot = runId ? join(dev, 'context-runs', runId) : join(dev, 'context');
+    const contextRoot = runId || reuseId ? join(dev, 'context-runs', runId ?? reuseId) : join(dev, 'context');
     return {
       stage,
       profile: join(contextRoot, 'profile'),
       dataDir: join(contextRoot, 'data'),
-      reportPath: join(contextRoot, 'host-report.json'),
-      pdfPath: join(contextRoot, 'fixtures', 'reading.pdf'),
+      reportPath: join(contextRoot, reuseId ? `host-live-${reportId}.json` : 'host-report.json'),
+      pdfPath: join(contextRoot, 'fixtures', reuseId ? `live-reading-${reportId}.pdf` : 'reading.pdf'),
       cleanRuntimeTree: Boolean(runId),
+      ...(reuseId ? { reuseExisting: true, supplementPdfPath: join(contextRoot, 'fixtures', `live-supplement-${reportId}.pdf`) } : {}),
       ...(runId ? { exclusiveRoot: contextRoot } : {}),
     };
   }

@@ -306,12 +306,17 @@ export class WorkspaceStore implements ReaderWorkspace {
         task = validateTaskRecord(await this.readJson(`tasks/${file}`, 8 * 1024 * 1024));
         if (task.id !== file.slice(0, -5)) unavailable(); timestamp(task.createdAt); timestamp(task.updatedAt);
       } catch { unavailable(); }
-      const taskClient = task.kind === 'annotations' ? task.paper.clientId : task.kind === 'acquisition' ? task.target.clientId : task.items[0]?.before.clientId;
-      if (!taskClient || (task.kind === 'organization' && task.items.some(item => item.before.clientId !== taskClient))) unavailable();
+      const taskClient = task.kind === 'annotations' ? task.paper.clientId : task.kind === 'figure-annotations' ? task.selection.paper.clientId
+        : task.kind === 'acquisition' ? task.target.clientId : task.kind === 'child-notes' ? task.items[0]?.parent.clientId
+          : task.kind === 'collection-create' ? task.items[0]?.target.clientId : task.items[0]?.before.clientId;
+      if (!taskClient || (task.kind === 'organization' && task.items.some(item => item.before.clientId !== taskClient))
+        || (task.kind === 'metadata-update' && task.items.some(item => item.before.clientId !== taskClient))
+        || (task.kind === 'child-notes' && task.items.some(item => item.parent.clientId !== taskClient))) unavailable();
       if (this.clientId && taskClient !== this.clientId) unavailable();
       const conversation = conversations.get(task.conversationId);
       if (!conversation) continue; // A deleted conversation's ledger remains available to the task controller.
-      if (taskClient !== conversation.paper.clientId || (task.kind === 'annotations' && paperId(task.paper) !== paperId(conversation.paper))) unavailable();
+      if (taskClient !== conversation.paper.clientId || (task.kind === 'annotations' && paperId(task.paper) !== paperId(conversation.paper))
+        || (task.kind === 'figure-annotations' && paperId(task.selection.paper) !== paperId(conversation.paper))) unavailable();
       const tasks = result.get(conversation.id) ?? []; tasks.push(task); result.set(conversation.id, tasks);
     }
     return result;

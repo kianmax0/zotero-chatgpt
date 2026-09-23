@@ -94,6 +94,7 @@ prepare 脚本生成的 `driverSourceHash` 必须与本次工作树匹配，避�
 | `node scripts/prepare-host-test.mjs --context --native --run-id <id>` | 工作树原生适配器和合成条目/PDF；写入并撤销合成标注、标签、集合；不调用模型 |
 | `node scripts/prepare-host-test.mjs --context --live` | context 合成 PDF 上调用已登录 Codex，会使用实际额度；不接受 `--run-id` |
 | `node scripts/prepare-host-test.mjs --context --live --live-core-flows --login-wait-seconds <0..3600>` | 操作者完成官方 Agent 登录后，验证真实模型高亮候选经定位后自动原生写入、整理候选经 review/批准后写入，以及读回和冲突撤销 |
+| `node scripts/prepare-host-test.mjs --live-core --reuse-run-id <既有专用run-id> --report-id <新报告id> --login-wait-seconds <0..3600>` | 在已登录的专用 `context-runs/<run-id>` profile 上跑两轮 Sol/Luna 模型验收；要求实例已关闭、安装的 XPI 与传入文件 SHA 完全相同，保留该 profile 的设置和认证文件，报告名不得覆盖已有报告 |
 | `node scripts/prepare-host-test.mjs --embed` | 官方 browser/actor 比较探测；不自动登录，不采集认证和回答正文 |
 | `node scripts/prepare-host-test.mjs --embed --web-live` | 官方页面 actor 的真实可见提交链路；不能与 URL/watch/comparison probe 参数合用 |
 | `node scripts/prepare-host-test.mjs --embed --watch-seconds <n>` | 比较探测后保留人工观察窗口；只记录白名单网络/console/surface 状态 |
@@ -102,7 +103,7 @@ prepare 脚本生成的 `driverSourceHash` 必须与本次工作树匹配，避�
 | `node scripts/prepare-host-test.mjs --s5` | 进程中断与本地恢复隔离阶段 |
 | `node scripts/prepare-host-test.mjs --s6` | virgin、升级、回退隔离阶段 |
 
-参数组合继续由 `scripts/host-test-stage.mjs` 校验：`--native` 不与 `--live` / `--acceptance` 合用；`--live-core-flows` 必须与 `--context --live` 同用；登录等待只用于声明的阶段；主阶段互斥。
+参数组合由 `scripts/host-test-stage.mjs` 校验：`--native` 不与 `--live` / `--acceptance` 合用；`--live-core-flows` 必须与 `--context --live` 同用；`--reuse-run-id` 只用于明确的 live core 验收并要求独立 `--report-id`；登录等待只用于声明的阶段；主阶段互斥。
 
 `--native` 的候选是合成输入，只能证明 native API、账本和撤销。`--live-core-flows` 才能提供真实模型候选证据；只有完整报告满足断言才可声明该轮端到端通过，不能用局部 PASS 掩盖 fixture/driver FAIL。
 

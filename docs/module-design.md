@@ -83,7 +83,7 @@ conversation 文件应由一个持久化所有者串行写入；历史查询和 
 
 Chat surface 负责官方 browser 生命周期与受限 actor。Agent surface 负责原生 transcript、composer、模型选择和任务卡片。两者显示互斥；切换不迁移、重放或重新分类在途请求。
 
-文献库主窗口另有 Agent 工作区入口，不依赖 Reader 或 PDF。它用独立的本地 library session 身份显示获取/整理任务，复用同一个 `ActionTaskController` 审批与结果账本；不能为满足 Reader 会话的必填 `PaperScope` 伪造附件。主窗口的选中条目从该窗口的 `itemsView` 冻结，不能读取随后变动的焦点或其它窗口的选择。
+文献库主窗口有对话式 Agent 工作区，不依赖 Reader 或 PDF。入口位于条目搜索框旁，使用与 Reader 相同的对话气泡符号；工作区挂在 `#zotero-items-pane` 中，从工具栏下方与条目列表并排，同时保留 Zotero 原生条目详情栏和侧边按钮。窄窗改为在列表下方堆叠，分隔条按当前方向调节宽度或高度；不改变原生 pane 的隐藏状态或持久化宽度。进入 Reader 标签时主窗口工作区收起，不抢 Reader 焦点。两处共用 Reader `sidebar.css` 的模式开关、消息、起步卡、输入和任务卡片样式。主窗口头部的历史只导航本地 library Agent 消息，PDF 按钮只打开恰好选中条目的唯一 PDF；自动上下文图标只控制主窗口 Chat 的书目与摘要附带，直接读写一个插件 pref。工作区用独立的本地 library session、Codex thread 和消息记录承载主题发现、获取、整理、元数据、笔记及集合创建，并复用 `ActionTaskController` 审批与账本；不能为满足 Reader 会话的必填 `PaperScope` 伪造附件。`/skill` 仅选择受限能力，`@` 将本窗口选中条目或显式选择的文库、集合、文章冻结为有界只读上下文；原生 key 留在宿主。主窗口 Chat 则把单篇选中文献的书目和摘要送往官方网页，绝不通过 Agent thread。
 
 官方 browser 暂时不可见时按既有设计保留页面，而不是销毁会话；隐藏状态不能获得焦点或捕获其它模式输入。长期生命周期和关闭恢复由宿主明确管理，不依赖每次 view render 重建页面。
 
@@ -147,7 +147,7 @@ requestId 与冻结输入 hash 共同去重；相同 ID 对应不同内容必须
 
 模型不得获得 shell、任意文件、MCP、通用插件、浏览器或不受限 Zotero 工具。任务输出经过受限 schema 校验；上游未授权工具活动或不符合策略的审批请求必须拒绝并关闭受影响连接。
 
-文献库整理使用单独的 Agent thread/turn，保存在插件私有运行时以支持 `thread/read` 结果核验；它不伪装成 Reader 会话。输入只含冻结条目的模型可见元数据、标签和已有集合序号，native key 留在受限的本地待对账记录中。该记录在 `thread/start` 前保存冻结输入、请求 ID，随后记录 thread/turn ID；超时或结果不明时，下一次操作先按原身份读回/恢复，不能发起第二个模型 turn。返回的索引候选交给原任务控制器生成预览；模型阶段失败或结果不确定时不产生写入任务。获取 DOI/公开 URL 的受控元数据预览无需模型 turn，但仍属于 Agent 工作区，保存条目和附件必须通过任务批准。
+文献库 Agent 使用独立的持久 thread/turn；消息、冻结输入与原始 JSON 结果存于插件私有记录。输入只含模型可见的有界元数据、摘要、标签和集合序号；native key 留在本地。`thread/start` 前保存请求 ID，随后保存 thread/turn ID；超时或结果不明时按身份读回/恢复，不新开模型轮次。结构化结果先经严格 schema 和索引验证，再由任务控制器生成候选。OpenAlex 主题发现是固定来源的只读搜索；Zotero translator 元数据预览、查重和 OA PDF 下载仍由宿主受控端口负责。
 
 ### 5.3 任务批准、停止和结果
 
@@ -189,7 +189,7 @@ ReaderContext 沿用适配层聚合：组合既有身份、DocumentContext 和�
 
 账本保存 before/after、实际 addedTags 与 addedCollectionKeys。撤销先验证 delta 语义，再要求当前精确等于 after，仅移除实际新增项。人工后改、部分人工删除、缺失写后快照或所有权不明，分别保留数据并标为 conflict/uncertain。
 
-整理仅使用已有可编辑集合，不扩大为创建/重命名/删除集合、删除标签、移动或删除条目、改元数据和处理附件。
+整理仍只添加标签和已有集合关系。创建集合、空字段元数据补全及子笔记是分开的受限任务，不把整理模型输出当作这些写入的许可；均沿用批准、写前 intent、原生读回及精确撤销。
 
 ### 7.3 acquire
 

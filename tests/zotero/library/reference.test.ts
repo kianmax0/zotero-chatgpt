@@ -229,6 +229,42 @@ it('uses native PDF coordinates at fixed resolution without changing reader zoom
   await expect(f.port.capturePage(paperA, 0)).rejects.toThrow(/not downsampled/iu);
   expect(render).toHaveBeenCalledTimes(1);
 });
+
+it('captures only a frozen user-selected rectangle and rejects an obsolete PDF revision', async () => {
+  const rasterize = vi.fn().mockResolvedValue(png);
+  const f = setup({ rasterize });
+  const selection = { paper: paperA, revision: { ...f.pdf.revision }, pageIndex: 1, rect: [20, 30, 120, 180] as [number, number, number, number] };
+  const image = await f.port.captureRegion(selection);
+  expect(rasterize).toHaveBeenCalledWith(expect.objectContaining({ paper: paperA, revision: f.pdf.revision, pageIndex: 1, rect: selection.rect, scale: 2 }));
+  expect(image.origin).toEqual({ kind: 'paper', paper: paperA, pageIndex: 1, revision: f.pdf.revision });
+
+  rasterize.mockClear();
+  await expect(f.port.captureRegion({ ...selection, revision: { ...selection.revision, fingerprint: 'stale' } })).rejects.toThrow(/PDF changed/u);
+  expect(() => f.port.captureRegion({ ...selection, rect: [10, 10, 10, 20] })).toThrow(/valid rectangle/u);
+  expect(rasterize).not.toHaveBeenCalled();
+});
+
+it('rasterizes a selected region with the PDF page transform while preserving reader zoom', async () => {
+  const f = setup({ cloneInto: value => value }, true);
+  const document = new HappyWindow().document as unknown as Document; const canvas = document.createElement('canvas');
+  const dimensions: number[][] = [];
+  vi.spyOn(canvas, 'getContext').mockReturnValue({} as CanvasRenderingContext2D);
+  vi.spyOn(canvas, 'toDataURL').mockReturnValue(TINY_PNG_DATA_URL);
+  vi.spyOn(document, 'createElement').mockImplementation(() => canvas);
+  const getViewport = vi.fn((options: { scale: number; offsetX?: number; offsetY?: number }) => ({ width: 300 * options.scale, height: 400 * options.scale, convertToViewportRectangle: (rect: number[]) => rect.map(value => value * options.scale) }));
+  const render = vi.fn(() => { dimensions.push([canvas.width, canvas.height]); return { promise: Promise.resolve() }; });
+  const page = { view: [0, 0, 300, 400], getViewport, render };
+  const pdf = { ...f.pdf.pdf, getPage: vi.fn(() => Promise.resolve(page)) };
+  const pdfViewer = { currentScale: 1.5, currentScaleValue: 'page-width', scrollPageIntoView: vi.fn() };
+  const nativeWindow = { document, PDFViewerApplication: { pdfDocument: pdf, pdfViewer } };
+  f.host.Reader._readers.push({ itemID: 2, _internalReader: { _primaryView: { _iframeWindow: nativeWindow } } });
+  const image = await f.port.captureRegion({ paper: paperA, revision: f.pdf.revision, pageIndex: 0, rect: [30, 40, 120, 140] });
+  expect(image.mime).toBe('image/png'); expect(dimensions).toEqual([[180, 200]]);
+  expect(getViewport).toHaveBeenNthCalledWith(1, { scale: 2 });
+  expect(getViewport).toHaveBeenNthCalledWith(2, { scale: 2, offsetX: -60, offsetY: -80 });
+  expect(pdfViewer.currentScale).toBe(1.5); expect(pdfViewer.currentScaleValue).toBe('page-width');
+  expect(pdfViewer.scrollPageIntoView).not.toHaveBeenCalled(); expect(canvas.width).toBe(0);
+});
 it('unwraps the host page proxy before using its hidden PDF rendering methods', async () => {
   const wrappedPage = {};
   const document = new HappyWindow().document as unknown as Document; const canvas = document.createElement('canvas');

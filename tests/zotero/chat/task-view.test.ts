@@ -61,6 +61,26 @@ it('shows automatic highlights as applying without another approval control', ()
   expect(container.textContent).toContain('Defines the central variable');
 });
 
+it('offers a review for a native Figure callout and a named collection', async () => {
+  const { container, view, actions, action } = setup();
+  const figure: Extract<ActionTaskRecord, { kind: 'figure-annotations' }> = {
+    ...base, kind: 'figure-annotations', question: 'Explain this Figure',
+    selection: { paper: paperA, revision, pageIndex: 1, rect: [10, 20, 150, 180] },
+    image: { id: '123e4567-e89b-42d3-a456-426614174000', dataUrl: 'data:image/png;base64,AA==', mime: 'image/png', name: 'Figure.png', origin: { kind: 'paper', paper: paperA, pageIndex: 1, revision } },
+    items: [{ id: 'callout-one', kind: 'figure-callout', reservedKey: 'FIGURE01', inkKey: 'FIGURE02', status: 'candidate', proposal: { box: [0.1, 0.1, 0.5, 0.5], strokes: [[[0.1, 0.1], [0.5, 0.5]]], explanation: 'Key comparison' } }],
+  };
+  const collectionTask: Extract<ActionTaskRecord, { kind: 'collection-create' }> = {
+    ...base, id: 'task-collection', kind: 'collection-create', question: 'Create Methods',
+    items: [{ id: 'collection-one', kind: 'collection-create', reservedKey: 'NEWCOL01', status: 'candidate', target: { clientId: paperA.clientId, libraryId: paperA.libraryId, parentCollectionKey: null }, name: 'Methods' }],
+  };
+  view.update({ tasks: [figure, collectionTask] });
+  expect(container.textContent).toContain('Key comparison');
+  expect(container.textContent).toContain('Create collection');
+  expect(container.textContent).toContain('Methods');
+  action('approve').click();
+  await vi.waitFor(() => expect(actions.approveSelected).toHaveBeenCalledWith('task-one', ['callout-one'], {}));
+});
+
 it('requires explicit metadata and duplicate choices and sends the selected PDF preference', async () => {
   const { container, view, actions, change, action } = setup(); view.update({ tasks: [acquisition()] });
   expect(container.textContent).toContain('Research / Methods'); expect(action('approve').disabled).toBe(true);
@@ -71,6 +91,29 @@ it('requires explicit metadata and duplicate choices and sends the selected PDF 
   const pdf = container.querySelector<HTMLInputElement>('[data-zchatgpt-download-pdf]')!; pdf.checked = false; change(pdf);
   action('approve').click();
   await vi.waitFor(() => expect(actions.approveSelected).toHaveBeenCalledWith('task-one', ['paper-one'], { 'paper-one': { metadataIndex: 1, duplicateKey: 'EXIST002', downloadPDF: false } }));
+});
+
+it('reviews blank-field metadata additions and a child note without rendering model text as HTML', async () => {
+  const { container, view, actions, action } = setup();
+  const before = duplicate('PAPER001');
+  const metadataTask: Extract<ActionTaskRecord, { kind: 'metadata-update' }> = {
+    ...base, kind: 'metadata-update', question: 'Fill missing metadata',
+    items: [{ id: 'metadata-one', kind: 'metadata-update', reservedKey: 'METADATA', status: 'candidate', before,
+      preview: { identifier: '10.1/b', source: 'identifier', candidates: [{ ...before.metadata, date: '2026', abstractNote: 'Verified abstract' }] },
+      fields: { date: '2026', abstractNote: 'Verified abstract' } }],
+  };
+  const noteTask: Extract<ActionTaskRecord, { kind: 'child-notes' }> = {
+    ...base, id: 'note-task', kind: 'child-notes', question: 'Add a short summary',
+    items: [{ id: 'note-one', kind: 'child-note', reservedKey: 'NOTE0001', status: 'candidate', parent: before, body: 'Summary <script>alert(1)</script>' }],
+  };
+  view.update({ tasks: [metadataTask, noteTask] });
+  expect(container.textContent).toContain('date: 2026');
+  expect(container.textContent).toContain('Existing populated fields remain unchanged');
+  expect(container.textContent).toContain('Summary <script>alert(1)</script>');
+  expect(container.querySelector('script')).toBeNull();
+  expect(container.textContent).toContain('Review this note before it is saved');
+  action('approve').click();
+  await vi.waitFor(() => expect(actions.approveSelected).toHaveBeenCalledWith('task-one', ['metadata-one'], {}));
 });
 
 it('counts an item saved with its verified PDF as one saved item and one attached PDF', () => {

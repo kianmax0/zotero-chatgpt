@@ -1,6 +1,6 @@
-import { ReaderError, type Citation, type DocumentRevision, type PaperScope } from './index.ts';
+import { ReaderError, type Citation, type DocumentRevision, type ImageAttachment, type PaperScope } from './index.ts';
 import { validateCitation } from './validation.ts';
-import type { NativeAcquisitionResult, NativeAnnotationCandidate, NativeAnnotationSnapshot, NativeCollectionAddition, NativeCollectionTarget, NativeItemSnapshot, NativeMetadataPreview, NativeOrganizationChange, NativeOrganizationItemSnapshot, NativeQuoteResolution } from './native.ts';
+import type { NativeAcquisitionResult, NativeAnnotationCandidate, NativeAnnotationSnapshot, NativeChildNoteSnapshot, NativeCollectionAddition, NativeCollectionCreateTarget, NativeCollectionSnapshot, NativeCollectionTarget, NativeFigureCalloutProposal, NativeFigureCalloutSnapshot, NativeFigureSelection, NativeItemSnapshot, NativeMetadataFill, NativeMetadataPreview, NativeMetadataUpdateChange, NativeOrganizationChange, NativeOrganizationItemSnapshot, NativeQuoteResolution } from './native.ts';
 
 export interface AnnotationProposal { quote: string; pageIndex: number; reason: string }
 /**
@@ -61,6 +61,31 @@ export function parseOrganizationProposals(value: string): OrganizationProposal[
   if (new Set(proposals.map(proposal => proposal.itemIndex)).size !== proposals.length) invalid();
   return proposals;
 }
+/** Model geometry is normalized to the frozen crop; Zotero keys and native coordinates are rejected. */
+export function validateFigureCalloutProposal(value: unknown): NativeFigureCalloutProposal {
+  const proposal = record(value, ['box', 'strokes', 'explanation']);
+  if (!Array.isArray(proposal.box) || proposal.box.length !== 4 || !proposal.box.every(n => typeof n === 'number' && Number.isFinite(n) && n >= 0 && n <= 1)) invalid();
+  const box = proposal.box as [number, number, number, number];
+  if (box[2] - box[0] < 0.01 || box[3] - box[1] < 0.01) invalid();
+  if (!Array.isArray(proposal.strokes) || !proposal.strokes.length || proposal.strokes.length > 5) invalid();
+  const strokes: Array<Array<[number, number]>> = proposal.strokes.map(raw => {
+    if (!Array.isArray(raw) || raw.length < 2 || raw.length > 64) invalid();
+    return raw.map(point => {
+      if (!Array.isArray(point) || point.length !== 2 || !point.every(n => typeof n === 'number' && Number.isFinite(n) && n >= 0 && n <= 1)) invalid();
+      return [point[0] as number, point[1] as number];
+    });
+  });
+  const explanation = cleanAnnotationReason(text(proposal.explanation, 1200, 1).trim());
+  if (!explanation) invalid();
+  return { box: [...box] as [number, number, number, number], strokes, explanation };
+}
+export function parseFigureCalloutProposals(value: string): NativeFigureCalloutProposal[] {
+  text(value, 256 * 1024, 2);
+  let parsed: unknown; try { parsed = JSON.parse(value) as unknown; } catch { invalid(); }
+  const result = record(parsed, ['callouts']);
+  if (!Array.isArray(result.callouts) || !result.callouts.length || result.callouts.length > 5) invalid();
+  return result.callouts.map(validateFigureCalloutProposal);
+}
 /**
  * The one domain constructor for a Citation built from a task-resolved annotation candidate. The
  * task controller resolved and froze the quote against a PDF version; a view must not re-derive the
@@ -97,7 +122,7 @@ export function citationFromAnnotation(input: {
  */
 export type ActionTaskState = 'preparing' | 'review' | 'running' | 'completed' | 'partial' | 'cancelled' | 'uncertain' | 'undone' | 'conflict' | 'failed';
 export type ActionTaskItemStatus = 'candidate' | 'unresolved' | 'skipped' | 'writing' | 'applied' | 'metadata-only' | 'failed' | 'uncertain' | 'undoing' | 'undone' | 'conflict';
-export type ActionTaskOperation = 'annotation-create' | 'metadata-create' | 'collection-add' | 'pdf-acquire' | 'annotation-delete' | 'collection-remove' | 'item-trash' | 'attachment-trash' | 'organization-add' | 'organization-remove';
+export type ActionTaskOperation = 'annotation-create' | 'figure-callout-create' | 'metadata-create' | 'metadata-fill' | 'child-note-create' | 'collection-add' | 'collection-create' | 'pdf-acquire' | 'annotation-delete' | 'figure-callout-delete' | 'collection-remove' | 'collection-trash' | 'item-trash' | 'attachment-trash' | 'organization-add' | 'organization-remove' | 'metadata-restore' | 'child-note-trash';
 interface TaskItemBase {
   id: string;
   reservedKey: string;
@@ -131,6 +156,38 @@ export interface OrganizationTaskItem extends TaskItemBase {
   proposal: { tags: string[]; collections: NativeCollectionTarget[] };
   change?: NativeOrganizationChange;
 }
+export interface MetadataUpdateTaskItem extends TaskItemBase {
+  kind: 'metadata-update';
+  before: NativeItemSnapshot;
+  preview: NativeMetadataPreview;
+  fields: NativeMetadataFill;
+  change?: NativeMetadataUpdateChange;
+}
+export interface ChildNoteTaskItem extends TaskItemBase {
+  kind: 'child-note';
+  parent: NativeItemSnapshot;
+  /** Plain text from the model, never HTML or a Zotero identifier. */
+  body: string;
+  note?: NativeChildNoteSnapshot;
+}
+export interface FigureCalloutTaskItem extends TaskItemBase {
+  kind: 'figure-callout';
+  inkKey: string;
+  proposal: NativeFigureCalloutProposal;
+  callout?: NativeFigureCalloutSnapshot;
+}
+export interface CollectionCreateTaskItem extends TaskItemBase {
+  kind: 'collection-create';
+  target: NativeCollectionCreateTarget;
+  name: string;
+  collection?: NativeCollectionSnapshot;
+}
+/** Minimal safe Zotero rich-text note body with visible provenance; model text is never treated as HTML. */
+export function childNoteHTML(value: string): string {
+  const escape = (text: string) => text.replace(/&/gu, '&amp;').replace(/</gu, '&lt;').replace(/>/gu, '&gt;').replace(/"/gu, '&quot;').replace(/'/gu, '&#39;');
+  const paragraphs = value.trim().split(/\n\s*\n/u).map(part => `<p>${escape(part).replace(/\n/gu, '<br>')}</p>`).join('');
+  return `<div data-zchatgpt-provenance=\"zotero-chatgpt\">${paragraphs}<p><em>Generated by Zotero ChatGPT Agent</em></p></div>`;
+}
 export interface AcquisitionChoice { metadataIndex?: number; duplicateKey?: string; downloadPDF?: boolean }
 export type ActionTaskChoices = Record<string, AcquisitionChoice>;
 interface ActionTaskBase {
@@ -148,10 +205,18 @@ interface ActionTaskBase {
 export type ActionTaskRecord =
   | (ActionTaskBase & { kind: 'annotations'; paper: PaperScope; documentRevision: DocumentRevision; modelRequestId?: string; autoApply?: true; items: AnnotationTaskItem[] })
   | (ActionTaskBase & { kind: 'acquisition'; target: NativeCollectionTarget; items: AcquisitionTaskItem[] })
-  | (ActionTaskBase & { kind: 'organization'; modelRequestId?: string; items: OrganizationTaskItem[] });
+  | (ActionTaskBase & { kind: 'organization'; modelRequestId?: string; items: OrganizationTaskItem[] })
+  | (ActionTaskBase & { kind: 'metadata-update'; items: MetadataUpdateTaskItem[] })
+  | (ActionTaskBase & { kind: 'child-notes'; modelRequestId?: string; items: ChildNoteTaskItem[] })
+  | (ActionTaskBase & { kind: 'figure-annotations'; modelRequestId?: string; selection: NativeFigureSelection; image: ImageAttachment; items: FigureCalloutTaskItem[] })
+  | (ActionTaskBase & { kind: 'collection-create'; items: CollectionCreateTaskItem[] });
 export interface AnnotationTaskPlan { conversationId: string; paper: PaperScope; revision: DocumentRevision; question: string; modelRequestId?: string; autoApply?: true; candidates: AnnotationProposal[] }
 export interface AcquisitionTaskPlan { conversationId: string; target: NativeCollectionTarget; question: string; identifiers: string[] }
 export interface OrganizationTaskPlan { conversationId: string; question: string; modelRequestId?: string; selection: NativeOrganizationItemSnapshot[]; collections: NativeCollectionTarget[]; proposals: OrganizationProposal[] }
+export interface MetadataUpdateTaskPlan { conversationId: string; question: string; selection: NativeItemSnapshot[] }
+export interface ChildNoteTaskPlan { conversationId: string; question: string; modelRequestId?: string; proposals: Array<{ parent: NativeItemSnapshot; body: string }> }
+export interface CollectionCreateTaskPlan { conversationId: string; question: string; target: NativeCollectionCreateTarget; name: string }
+export interface FigureAnnotationTaskPlan { conversationId: string; question: string; modelRequestId?: string; selection: NativeFigureSelection; image: ImageAttachment; proposals: NativeFigureCalloutProposal[] }
 /** Durable action-task ledger surfaced to the UI; the implementation is `core/tasks`. */
 export interface ActionTasks {
   list(conversationId?: string): Promise<ActionTaskRecord[]>;
@@ -160,6 +225,10 @@ export interface ActionTasks {
   planAnnotations(input: AnnotationTaskPlan): Promise<ActionTaskRecord>;
   planAcquisition(input: AcquisitionTaskPlan): Promise<ActionTaskRecord>;
   planOrganization(input: OrganizationTaskPlan): Promise<ActionTaskRecord>;
+  planMetadataUpdate(input: MetadataUpdateTaskPlan): Promise<ActionTaskRecord>;
+  planChildNotes(input: ChildNoteTaskPlan): Promise<ActionTaskRecord>;
+  planCollectionCreate(input: CollectionCreateTaskPlan): Promise<ActionTaskRecord>;
+  planFigureAnnotations(input: FigureAnnotationTaskPlan): Promise<ActionTaskRecord>;
   approve(id: string, selectedItemIds: string[], choices?: ActionTaskChoices): Promise<ActionTaskRecord>;
   cancel(id: string): Promise<ActionTaskRecord>;
   reconcile(id: string): Promise<ActionTaskRecord>;

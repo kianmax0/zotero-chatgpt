@@ -18,17 +18,23 @@ Explain a passage, unpack a derivation, or ask a follow-up—right beside your P
 
 ## Put Agent to work
 
-Highlight key passages. Organize selected papers with tags and collections. From Zotero's library window, open **Zotero Agent** to add a paper from a DOI or public article URL without opening a PDF first. Explicit Agent highlight requests apply only after the quoted passages are verified against the PDF; each result can be located or undone. Library acquisition and organization still show a review before writing.
+Highlight key passages and explain a Figure with native callouts. In Zotero's main library window, open **Zotero Agent** to ask for papers on a topic, organize selected or `@` mentioned articles, fill blank DOI-backed metadata, create a short abstract-based note, or create a collection. The workbench has a conversation, `/` skills, `@` Zotero references, and a review card for each write. You can switch the same main-window panel to official ChatGPT for one selected article.
+
+Agent highlights apply automatically only after the quoted passages are verified against the PDF. Figure callouts and library writes require review, with native readback and conflict-aware undo. Topic search uses OpenAlex for discovery; a paper is only reported as downloaded when Zotero verifies its OA PDF attachment.
 
 > “Highlight the five most important passages and explain why.”
 
-In an isolated Zotero test library, a public PLOS DOI was reviewed and saved as a native item with a verified PDF attachment. The refreshed main-window interface and a live model highlight GIF are still awaiting visual capture in the dedicated test profile.
+In a dedicated Zotero test library, GPT-6 Sol highlighted three verified passages in *Attention Is All You Need* and Zotero saved all three native annotations automatically.
+
+![Real GPT-6 Sol Agent request automatically highlighting Attention Is All You Need in Zotero.](docs/media/agent-classic-paper-demo.gif)
+
+Figure callouts, collection creation, metadata fill, and notes have local and native test coverage; their complete model-to-approval flows still need separate live verification.
 
 Agent is experimental; fetching open-access PDFs from a DOI or article link is still being refined.
 
 ## Get started
 
-Install the `.xpi` in Zotero. Open a PDF and its sidebar for Chat or paper highlights; use **Zotero Agent** in the main library window for article acquisition and selected-item organization. Sign in to Codex when you use a model-backed Agent task.
+Install the `.xpi` in Zotero. Open a PDF and its sidebar for Chat, highlights or Figure explanations. Use **Zotero Agent** in the main library window for topic discovery and library work; no PDF needs to be open. Sign in to Codex when you use a model-backed Agent task.
 
 **Chat needs no API key and uses no Codex quota.**
 Agent uses Codex quota and requires separate sign-in.

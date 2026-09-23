@@ -97,6 +97,16 @@ entry, and the PDF was attached by hand in the isolated library.
   These are separate stills from the same product run, not a continuous screen recording. They do
   not demonstrate a model-generated highlight or a general claim that every DOI has an OA PDF.
 
+## `agent-classic-paper-demo.gif` (2026-09-23)
+
+- **Type:** trimmed screen recording of a real Codex Agent turn and Zotero's resulting native highlight. No frames or annotations were drawn in editing.
+- **Paper:** Vaswani et al., *Attention Is All You Need*, [arXiv:1706.03762](https://arxiv.org/abs/1706.03762), imported with its public PDF into the dedicated `Transformer demo` test collection. Source PDF SHA-256: `bdfaa68d8984f0dc02beaca527b76f207d99b666d31d1da728ee0728182df697`.
+- **Host:** Zotero 9.0.6, macOS Apple Silicon, dedicated `.zotero-chatgpt-dev/context-runs/library-agent-visual-20260923-1625/{profile,data}`. The user completed official Codex sign-in in this dedicated profile. No everyday library was used or captured.
+- **Build:** `dist/zotero-chatgpt-0.1.1-dev.xpi`, SHA-256 `af5d6bd72ed1aedff6beaa7c705dfc3f29ed5723575f37e76440e801755347f3` at capture time. Later source changes are identified by a different SHA; this clip is not evidence for those changes.
+- **Actual work:** one `gpt-6-sol` turn (request `c77878ac-1fee-4d6e-b968-4d0146771c17`) completed and its durable task recorded `autoApply: true`, `completed`, and 3/3 items `applied`. The visible yellow passage and task card show the real Reader result. The model took about 126 seconds; the clip shows the end of that wait and automatic native application, with no second approval click.
+- **Processing:** `ffmpeg` captured the public-paper Reader window at 10 fps. The GIF uses a contiguous 12-second tail, sampled to 6 fps and resized to 1000 px. The source recording is retained in ignored `.zotero-chatgpt-dev/demo-attention/raw-highlight.mp4`; GIF SHA-256 `c01eabca01ba60f8d7972dfc38627740a49c0df4d4e2a4d3b06292973e08a9de`.
+- **Limit:** the GIF shows one highlighted passage and a 3/3 task count. The durable task and native readback establish the three applied annotations; the GIF alone does not show every annotation or prove their scientific importance.
+
 ## Rebuilding
 
 The working scripts and the raw captures are intentionally outside version control, under

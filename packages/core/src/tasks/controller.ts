@@ -1,9 +1,9 @@
 import { clone } from '../../../contracts/src/clone.ts';
-import { NATIVE_ANNOTATION_PROVENANCE, NativeOperationError, type NativeActionPort, type NativeAnnotationSnapshot, type NativeCollectionTarget, type NativeOrganizationItemSnapshot } from '../../../contracts/src/native.ts';
-import { ReaderError, type DocumentRevision } from '../../../contracts/src/index.ts';
-import { validatePaperScope } from '../../../contracts/src/validation.ts';
+import { NATIVE_ANNOTATION_PROVENANCE, NativeOperationError, type NativeActionPort, type NativeAnnotationSnapshot, type NativeCollectionCreateTarget, type NativeCollectionSnapshot, type NativeCollectionTarget, type NativeFigureAnnotationSnapshot, type NativeFigureCalloutInput, type NativeFigureCalloutSnapshot, type NativeFigureSelection, type NativeOrganizationItemSnapshot } from '../../../contracts/src/native.ts';
+import { ReaderError, type DocumentRevision, type ImageAttachment, type Rect } from '../../../contracts/src/index.ts';
+import { validateImageAttachment, validatePaperScope } from '../../../contracts/src/validation.ts';
 import type { StoragePort } from '../../../contracts/src/runtime.ts';
-import { cleanAnnotationReason, validateAnnotationProposal as proposal, validateOrganizationProposal, type AcquisitionChoice, type AcquisitionTaskItem, type ActionTaskOperation, type ActionTaskRecord, type ActionTasks, type AnnotationTaskItem, type OrganizationTaskItem } from '../../../contracts/src/tasks.ts';
+import { childNoteHTML, cleanAnnotationReason, validateAnnotationProposal as proposal, validateFigureCalloutProposal, validateOrganizationProposal, type AcquisitionChoice, type AcquisitionTaskItem, type ActionTaskOperation, type ActionTaskRecord, type ActionTasks, type AnnotationTaskItem, type ChildNoteTaskItem, type CollectionCreateTaskItem, type FigureCalloutTaskItem, type MetadataUpdateTaskItem, type OrganizationTaskItem } from '../../../contracts/src/tasks.ts';
 export interface ActionTaskClock { uuid(): string; key(): string; now(): string }
 interface TaskCoordination { queue: Promise<void>; active: Map<string, AbortController>; stopRequests: Set<string> }
 const coordinationByStorage = new WeakMap<StoragePort, TaskCoordination>();
@@ -11,7 +11,7 @@ const ID = /^[a-zA-Z0-9-]{1,128}$/u;
 const KEY = /^[A-Z0-9]{8}$/u;
 const STATES = ['preparing', 'review', 'running', 'completed', 'partial', 'cancelled', 'uncertain', 'undone', 'conflict', 'failed'];
 const ITEM_STATES = ['candidate', 'unresolved', 'skipped', 'writing', 'applied', 'metadata-only', 'failed', 'uncertain', 'undoing', 'undone', 'conflict'];
-const OPERATIONS = ['annotation-create', 'metadata-create', 'collection-add', 'pdf-acquire', 'annotation-delete', 'collection-remove', 'item-trash', 'attachment-trash', 'organization-add', 'organization-remove'];
+const OPERATIONS = ['annotation-create', 'figure-callout-create', 'metadata-create', 'metadata-fill', 'child-note-create', 'collection-add', 'collection-create', 'pdf-acquire', 'annotation-delete', 'figure-callout-delete', 'collection-remove', 'collection-trash', 'item-trash', 'attachment-trash', 'organization-add', 'organization-remove', 'metadata-restore', 'child-note-trash'];
 function invalid(): never { throw new ReaderError('INVALID_REQUEST', 'The task input is invalid or no longer matches its review.'); }
 function unavailable(): never { throw new ReaderError('HISTORY_UNAVAILABLE', 'Task records could not be read and remain untouched.'); }
 function id(value: unknown): string { if (typeof value !== 'string' || !ID.test(value)) invalid(); return value; }
@@ -37,6 +37,25 @@ function collectionTarget(value: unknown): NativeCollectionTarget {
   validatePaperScope({ clientId: t.clientId, libraryId: t.libraryId, attachmentKey: key(t.collectionKey) });
   return { clientId: t.clientId as string, libraryId: t.libraryId as number, collectionKey: t.collectionKey as string };
 }
+function collectionCreateTarget(value: unknown): NativeCollectionCreateTarget {
+  const target = record(value, ['clientId', 'libraryId', 'parentCollectionKey']);
+  const base = validatePaperScope({ clientId: target.clientId, libraryId: target.libraryId, attachmentKey: 'TARGET01' });
+  if (target.parentCollectionKey !== null) key(target.parentCollectionKey);
+  return { clientId: base.clientId, libraryId: base.libraryId, parentCollectionKey: target.parentCollectionKey as string | null };
+}
+function collectionSnapshot(value: unknown): NativeCollectionSnapshot {
+  const collection = record(value, ['clientId', 'libraryId', 'collectionKey', 'name', 'parentKey', 'childItemKeys', 'childCollectionKeys', 'dateModified', 'contentSignature']);
+  validatePaperScope({ clientId: collection.clientId, libraryId: collection.libraryId, attachmentKey: key(collection.collectionKey) });
+  text(collection.name, 128, 1); if (collection.parentKey !== null) key(collection.parentKey);
+  strings(collection.childItemKeys, 10000, 8, true); strings(collection.childCollectionKeys, 1000, 8, true);
+  text(collection.dateModified, 128); text(collection.contentSignature, 1024 * 1024);
+  return clone(collection) as unknown as NativeCollectionSnapshot;
+}
+function safeCollectionName(value: unknown): string {
+  const name = text(value, 128, 1).trim().normalize('NFC');
+  if (!name || /[\u0000-\u001f]/u.test(name)) invalid();
+  return name;
+}
 function strings(value: unknown, maxItems: number, maxLength: number, keys = false): string[] {
   if (!Array.isArray(value) || value.length > maxItems) invalid();
   const result = value.map(item => keys ? key(item) : text(item, maxLength, 1));
@@ -49,6 +68,66 @@ function itemSnapshot(value: unknown): NativeOrganizationItemSnapshot {
   text(item.dateModified, 128); text(item.contentSignature, 1024 * 1024); text(item.organizationSignature, 1024 * 1024);
   return clone(item) as unknown as NativeOrganizationItemSnapshot;
 }
+function plainItemSnapshot(value: unknown): import('../../../contracts/src/native.ts').NativeItemSnapshot {
+  const item = record(value, ['clientId', 'libraryId', 'key', 'metadata', 'collectionKeys', 'attachmentKeys', 'dateModified', 'contentSignature']);
+  validatePaperScope({ clientId: item.clientId, libraryId: item.libraryId, attachmentKey: key(item.key) });
+  record(item.metadata); strings(item.collectionKeys, 2048, 8, true); strings(item.attachmentKeys, 1000, 8, true);
+  text(item.dateModified, 128); text(item.contentSignature, 1024 * 1024);
+  return clone(item) as unknown as import('../../../contracts/src/native.ts').NativeItemSnapshot;
+}
+const FILL_FIELDS = ['title', 'DOI', 'url', 'date', 'publicationTitle', 'bookTitle', 'conferenceName', 'volume', 'issue', 'pages', 'publisher', 'place', 'ISBN', 'abstractNote', 'language'];
+function metadataFields(value: unknown, allowEmpty = false): Record<string, string> {
+  const fields = record(value); if ((!allowEmpty && !Object.keys(fields).length) || Object.keys(fields).some(name => !FILL_FIELDS.includes(name))) invalid();
+  for (const field of Object.keys(fields)) text(fields[field], field === 'abstractNote' ? 32768 : 8192, 1);
+  return clone(fields) as Record<string, string>;
+}
+function childNoteSnapshot(value: unknown): import('../../../contracts/src/native.ts').NativeChildNoteSnapshot {
+  const note = record(value, ['clientId', 'libraryId', 'key', 'parentKey', 'body', 'contentSignature']);
+  validatePaperScope({ clientId: note.clientId, libraryId: note.libraryId, attachmentKey: key(note.key) });
+  key(note.parentKey); text(note.body, 48000, 1); text(note.contentSignature, 1024 * 1024);
+  return clone(note) as unknown as import('../../../contracts/src/native.ts').NativeChildNoteSnapshot;
+}
+function figureSelection(value: unknown): NativeFigureSelection {
+  const input = record(value, ['paper', 'revision', 'pageIndex', 'rect']);
+  const paper = validatePaperScope(input.paper); const revision = documentRevision(input.revision);
+  if (!Number.isSafeInteger(input.pageIndex) || (input.pageIndex as number) < 0 || (input.pageIndex as number) >= 10000 || !Array.isArray(input.rect) || input.rect.length !== 4 || !input.rect.every(n => typeof n === 'number' && Number.isFinite(n) && Math.abs(n) < 1_000_000)) invalid();
+  const rect = input.rect as Rect;
+  if (!(rect[2] > rect[0] && rect[3] > rect[1])) invalid();
+  return { paper, revision, pageIndex: input.pageIndex as number, rect: [...rect] as Rect };
+}
+function figureImage(value: unknown, selection: NativeFigureSelection): ImageAttachment {
+  const image = validateImageAttachment(value);
+  const origin = image.origin;
+  if (image.mime !== 'image/png' || origin?.kind !== 'paper' || !equal(origin.paper, selection.paper) || origin.pageIndex !== selection.pageIndex || !equal(origin.revision, selection.revision)) invalid();
+  return image;
+}
+function figureAnnotationSnapshot(value: unknown, paper: NativeFigureSelection['paper'], keyValue: string, type: 'image' | 'ink', pageIndex: number): NativeFigureAnnotationSnapshot {
+  const annotation = record(value, ['paper', 'key', 'type', 'comment', 'color', 'pageLabel', 'sortIndex', 'position', 'authorName', 'isExternal', 'tags', 'dateModified', 'imageSHA256']);
+  key(annotation.key); if (annotation.key !== keyValue || annotation.type !== type || !equal(annotation.paper, paper)) invalid();
+  text(annotation.comment, 4096); text(annotation.color, 32, 1); text(annotation.pageLabel, 128); text(annotation.sortIndex, 64, 1); text(annotation.authorName, 256); text(annotation.dateModified, 128, 1);
+  if (annotation.isExternal !== false || !Array.isArray(annotation.tags) || annotation.tags.length > 128 || annotation.tags.some(tag => typeof tag !== 'string')) invalid();
+  if (typeof annotation.imageSHA256 !== 'string' || !/^[a-f0-9]{64}$/u.test(annotation.imageSHA256)) invalid();
+  const position = record(annotation.position);
+  if (position.pageIndex !== pageIndex) invalid();
+  if (type === 'image') {
+    if (Object.keys(position).some(name => !['pageIndex', 'rects'].includes(name)) || !Array.isArray(position.rects) || position.rects.length !== 1) invalid();
+    const rects = position.rects as unknown[]; const rect = rects[0];
+    if (!Array.isArray(rect) || rect.length !== 4 || !rect.every(n => typeof n === 'number' && Number.isFinite(n) && Math.abs(n) < 1_000_000) || !(rect[2]! > rect[0]! && rect[3]! > rect[1]!)) invalid();
+    return clone(annotation) as unknown as NativeFigureAnnotationSnapshot;
+  }
+  if (Object.keys(position).some(name => !['pageIndex', 'paths', 'width'].includes(name)) || !Array.isArray(position.paths) || !position.paths.length || position.paths.length > 5 || typeof position.width !== 'number' || !Number.isFinite(position.width) || position.width <= 0 || position.width > 100) invalid();
+  if (position.paths.some(path => !Array.isArray(path) || path.length < 4 || path.length > 128 || path.length % 2 !== 0 || !path.every(n => typeof n === 'number' && Number.isFinite(n) && Math.abs(n) < 1_000_000))) invalid();
+  return clone(annotation) as unknown as NativeFigureAnnotationSnapshot;
+}
+function figureCalloutSnapshot(value: unknown, selection: NativeFigureSelection, imageKey: string, inkKey: string): NativeFigureCalloutSnapshot {
+  const callout = record(value, ['selection', 'image', 'ink']);
+  const frozen = figureSelection(callout.selection);
+  if (!equal(frozen, selection)) invalid();
+  const image = figureAnnotationSnapshot(callout.image, selection.paper, imageKey, 'image', selection.pageIndex);
+  const ink = figureAnnotationSnapshot(callout.ink, selection.paper, inkKey, 'ink', selection.pageIndex);
+  if (!image.comment.startsWith(NATIVE_ANNOTATION_PROVENANCE) || !ink.comment.startsWith(NATIVE_ANNOTATION_PROVENANCE)) invalid();
+  return { selection: frozen, image, ink };
+}
 function choice(value: unknown): AcquisitionChoice {
   const c = record(value, ['metadataIndex', 'duplicateKey', 'downloadPDF']);
   if (c.metadataIndex !== undefined && (!Number.isSafeInteger(c.metadataIndex) || (c.metadataIndex as number) < 0 || (c.metadataIndex as number) >= 20)) invalid();
@@ -57,19 +136,23 @@ function choice(value: unknown): AcquisitionChoice {
   return clone(c);
 }
 export function validateTaskRecord(value: unknown): ActionTaskRecord {
-  const raw = record(value, ['schemaVersion', 'id', 'conversationId', 'kind', 'state', 'question', 'createdAt', 'updatedAt', 'revision', 'approvedAt', 'cancelRequested', 'paper', 'documentRevision', 'modelRequestId', 'autoApply', 'target', 'items']);
-  if (raw.schemaVersion !== 1 || !STATES.includes(String(raw.state)) || !['annotations', 'acquisition', 'organization'].includes(String(raw.kind))) invalid();
+  const raw = record(value, ['schemaVersion', 'id', 'conversationId', 'kind', 'state', 'question', 'createdAt', 'updatedAt', 'revision', 'approvedAt', 'cancelRequested', 'paper', 'documentRevision', 'modelRequestId', 'autoApply', 'target', 'selection', 'image', 'items']);
+  if (raw.schemaVersion !== 1 || !STATES.includes(String(raw.state)) || !['annotations', 'acquisition', 'organization', 'metadata-update', 'child-notes', 'figure-annotations', 'collection-create'].includes(String(raw.kind))) invalid();
   id(raw.id); id(raw.conversationId); text(raw.question, 16000); text(raw.createdAt, 64, 1); text(raw.updatedAt, 64, 1);
   if (!Number.isSafeInteger(raw.revision) || (raw.revision as number) < 0 || !Array.isArray(raw.items) || raw.items.length > 50 || (raw.cancelRequested !== undefined && raw.cancelRequested !== true)) invalid();
-  if (raw.kind === 'organization' && raw.items.length === 0) invalid();
+  if (['organization', 'metadata-update', 'child-notes', 'figure-annotations', 'collection-create'].includes(String(raw.kind)) && raw.items.length === 0) invalid();
   if (raw.approvedAt !== undefined) text(raw.approvedAt, 64, 1);
   if (raw.kind === 'annotations') { validatePaperScope(raw.paper); documentRevision(raw.documentRevision); if (raw.modelRequestId !== undefined) id(raw.modelRequestId); if (raw.autoApply !== undefined && raw.autoApply !== true) invalid(); }
   else if (raw.kind === 'acquisition') { if (raw.autoApply !== undefined) invalid(); collectionTarget(raw.target); }
-  else if (raw.autoApply !== undefined) invalid();
-  else if (raw.modelRequestId !== undefined) id(raw.modelRequestId);
+  else if (raw.kind === 'organization' || raw.kind === 'child-notes') { if (raw.autoApply !== undefined) invalid(); if (raw.modelRequestId !== undefined) id(raw.modelRequestId); }
+  else if (raw.kind === 'figure-annotations') { if (raw.autoApply !== undefined) invalid(); if (raw.modelRequestId !== undefined) id(raw.modelRequestId); }
+  else if (raw.kind === 'collection-create') { if (raw.autoApply !== undefined || raw.modelRequestId !== undefined) invalid(); }
+  else if (raw.autoApply !== undefined || raw.modelRequestId !== undefined) invalid();
+  let selectedFigure: NativeFigureSelection | undefined; let selectedImage: ImageAttachment | undefined;
+  if (raw.kind === 'figure-annotations') { selectedFigure = figureSelection(raw.selection); selectedImage = figureImage(raw.image, selectedFigure); }
   const ids = new Set<string>(); const keys = new Set<string>();
   for (const value of raw.items) {
-    const entry = record(value, ['id', 'kind', 'reservedKey', 'status', 'operation', 'errorCode', 'selected', 'proposal', 'resolution', 'annotation', 'identifier', 'preview', 'duplicates', 'choice', 'item', 'created', 'collectionAddition', 'acquisition', 'attachmentUndone', 'sourceIndex', 'before', 'change']);
+    const entry = record(value, ['id', 'kind', 'reservedKey', 'status', 'operation', 'errorCode', 'selected', 'proposal', 'resolution', 'annotation', 'identifier', 'preview', 'duplicates', 'choice', 'item', 'created', 'collectionAddition', 'acquisition', 'attachmentUndone', 'sourceIndex', 'before', 'change', 'fields', 'parent', 'body', 'note', 'inkKey', 'callout', 'target', 'name', 'collection']);
     const itemID = id(entry.id); const itemKey = key(entry.reservedKey);
     if (ids.has(itemID) || keys.has(itemKey) || !ITEM_STATES.includes(String(entry.status)) || (entry.selected !== undefined && typeof entry.selected !== 'boolean') || (entry.operation !== undefined && (typeof entry.operation !== 'string' || !OPERATIONS.includes(entry.operation)))) invalid();
     ids.add(itemID); keys.add(itemKey);
@@ -89,7 +172,7 @@ export function validateTaskRecord(value: unknown): ActionTaskRecord {
       if (entry.created !== undefined && typeof entry.created !== 'boolean') invalid();
       if (entry.attachmentUndone !== undefined && entry.attachmentUndone !== true) invalid();
       if (entry.item !== undefined) { const item = record(entry.item); const target = record(raw.target); if (item.clientId !== target.clientId || item.libraryId !== target.libraryId || (entry.created && item.key !== itemKey)) invalid(); }
-    } else {
+    } else if (raw.kind === 'organization') {
       if (entry.kind !== 'organization' || !Number.isSafeInteger(entry.sourceIndex) || (entry.sourceIndex as number) < 0 || (entry.sourceIndex as number) >= 50) invalid();
       const before = itemSnapshot(entry.before); const change = entry.change === undefined ? undefined : record(entry.change, ['before', 'after', 'addedTags', 'addedCollectionKeys']);
       const p = record(entry.proposal, ['tags', 'collections']); strings(p.tags, 24, 128);
@@ -105,11 +188,48 @@ export function validateTaskRecord(value: unknown): ActionTaskRecord {
             || before.tags.some(tag => !after.tags.includes(tag)) || before.collectionKeys.some(collectionKey => !after.collectionKeys.includes(collectionKey))
             || !equal(addedTags, expectedTags) || !equal(addedCollectionKeys, expectedCollections)) invalid();
       }
+    } else if (raw.kind === 'metadata-update') {
+      if (entry.kind !== 'metadata-update') invalid();
+      const before = plainItemSnapshot(entry.before); const preview = record(entry.preview);
+      if (!Array.isArray(preview.candidates) || preview.candidates.length > 20) invalid();
+      const fields = metadataFields(entry.fields, true);
+      if (entry.change !== undefined) {
+        const change = record(entry.change, ['before', 'after', 'fields']); const changeBefore = plainItemSnapshot(change.before); const after = plainItemSnapshot(change.after);
+        if (!equal(changeBefore, before) || after.key !== before.key || after.libraryId !== before.libraryId || after.clientId !== before.clientId || !equal(metadataFields(change.fields), fields)) invalid();
+        for (const [field, fieldValue] of Object.entries(fields)) if ((after.metadata as unknown as Record<string, unknown>)[field] !== fieldValue) invalid();
+      }
+    } else if (raw.kind === 'figure-annotations') {
+      if (entry.kind !== 'figure-callout' || !selectedFigure || !selectedImage) invalid();
+      const inkKey = key(entry.inkKey); if (inkKey === itemKey || keys.has(inkKey)) invalid(); keys.add(inkKey);
+      const figureProposal = validateFigureCalloutProposal(entry.proposal);
+      if (entry.callout !== undefined) figureCalloutSnapshot(entry.callout, selectedFigure, itemKey, inkKey);
+      void figureProposal;
+    } else if (raw.kind === 'collection-create') {
+      if (entry.kind !== 'collection-create') invalid();
+      const target = collectionCreateTarget(entry.target); const name = safeCollectionName(entry.name);
+      if (entry.reservedKey === undefined) invalid();
+      if (entry.collection !== undefined) {
+        const collection = collectionSnapshot(entry.collection);
+        if (collection.clientId !== target.clientId || collection.libraryId !== target.libraryId || collection.collectionKey !== itemKey || collection.name !== name || collection.parentKey !== target.parentCollectionKey) invalid();
+      }
+    } else {
+      if (entry.kind !== 'child-note') invalid();
+      const parent = plainItemSnapshot(entry.parent); text(entry.body, 24000, 1);
+      if (entry.note !== undefined) { const note = childNoteSnapshot(entry.note); if (note.clientId !== parent.clientId || note.libraryId !== parent.libraryId || note.parentKey !== parent.key || note.key !== itemKey) invalid(); }
     }
   }
   if (raw.kind === 'organization') {
     const scope = raw.items.map(value => { const entry = record(value); const before = record(entry.before); return `${String(before.clientId)}:${String(before.libraryId)}`; });
     if (new Set(scope).size !== 1) invalid();
+  }
+  if (raw.kind === 'metadata-update' || raw.kind === 'child-notes') {
+    const scopes = raw.items.map(value => { const entry = record(value); const source = record(raw.kind === 'metadata-update' ? entry.before : entry.parent); return `${String(source.clientId)}:${String(source.libraryId)}`; });
+    if (new Set(scopes).size !== 1) invalid();
+  }
+  if (raw.kind === 'collection-create' && raw.items.length !== 1) invalid();
+  if (raw.kind === 'figure-annotations') {
+    const scopes = raw.items.map(value => { const item = record(value); const callout = item.callout === undefined ? undefined : record(item.callout); const scope = callout ? record(callout.selection) : selectedFigure!; return `${String(record(scope.paper).clientId)}:${String(record(scope.paper).libraryId)}`; });
+    if (new Set(scopes).size !== 1) invalid();
   }
   return clone(raw) as unknown as ActionTaskRecord;
 }
@@ -126,6 +246,12 @@ function matchesAnnotation(item: AnnotationTaskItem, snapshot: NativeAnnotationS
   return snapshot.key === item.reservedKey && equal(snapshot.paper, candidate.source.paper) && snapshot.type === 'highlight' && snapshot.color === '#ffd400'
     && snapshot.text === candidate.text && snapshot.comment === NATIVE_ANNOTATION_PROVENANCE + (item.proposal.reason ? '\n' + item.proposal.reason.trim().normalize('NFC') : '')
     && !snapshot.isExternal && snapshot.authorName === '' && snapshot.tags.length === 0 && snapshot.sortIndex === candidate.sortIndex && snapshot.pageLabel === candidate.pageLabel && equal(snapshot.position, candidate.position);
+}
+function figureNativeData(callout: NativeFigureCalloutSnapshot): unknown {
+  const withoutCacheHash = (annotation: NativeFigureCalloutSnapshot['image']) => {
+    const record: Record<string, unknown> = { ...annotation }; delete record.imageSHA256; return record;
+  };
+  return { selection: callout.selection, image: withoutCacheHash(callout.image), ink: withoutCacheHash(callout.ink) };
 }
 function aggregate(task: ActionTaskRecord): ActionTaskRecord['state'] {
   const selected = task.items.filter(item => item.selected);
@@ -293,6 +419,126 @@ export class ActionTaskController implements ActionTasks {
       } finally { this.active.delete(task.id); }
     });
   };
+  planMetadataUpdate: ActionTasks['planMetadataUpdate'] = value => {
+    const input = clone(value);
+    if (!Array.isArray(input.selection) || !input.selection.length || input.selection.length > 50) invalid();
+    const selection = input.selection.map(plainItemSnapshot);
+    const identities = selection.map(item => `${item.clientId}:${item.libraryId}:${item.key}`);
+    if (new Set(identities).size !== identities.length || new Set(selection.map(item => `${item.clientId}:${item.libraryId}`)).size !== 1) invalid();
+    return this.serial(async () => {
+      const task: Extract<ActionTaskRecord, { kind: 'metadata-update' }> = { ...this.base(id(input.conversationId), text(input.question, 16000)), kind: 'metadata-update', items: selection.map(before => ({ kind: 'metadata-update', id: id(this.clock.uuid()), reservedKey: key(this.clock.key()), status: 'candidate', before, preview: { identifier: before.metadata.DOI ?? '', source: 'identifier', candidates: [] }, fields: {} })) };
+      const abort = await this.begin(task);
+      try {
+        for (const before of selection) {
+          if (abort.signal.aborted || this.stopRequests.has(task.id)) { task.cancelRequested = true; task.state = 'cancelled'; break; }
+          const entry = task.items.find(item => item.before.key === before.key)!;
+          try {
+            const current = await readWhileActive(this.native.inspectItem(before, abort.signal), abort.signal);
+            if (!current || !equal(current, before)) throw new NativeOperationError('CONFLICT', 'The selected Zotero item changed before metadata retrieval.');
+            const doi = before.metadata.DOI?.trim();
+            if (!doi) throw new NativeOperationError('UNAVAILABLE', 'Metadata retrieval requires a DOI on the selected Zotero item.');
+            const preview = await readWhileActive(this.native.previewMetadata({ identifier: doi }, abort.signal), abort.signal);
+            entry.preview = preview;
+            const candidate = preview.candidates.find(row => row.DOI?.trim().toLowerCase() === doi.toLowerCase());
+            if (!candidate) throw new NativeOperationError('UNAVAILABLE', 'No metadata candidate matched the selected DOI.');
+            const fields: Record<string, string> = {};
+            for (const field of FILL_FIELDS) {
+              const currentValue = (before.metadata as unknown as Record<string, unknown>)[field]; const proposed = (candidate as unknown as Record<string, unknown>)[field];
+              if (typeof proposed !== 'string' || !proposed.trim()) continue;
+              if (typeof currentValue === 'string' && currentValue.trim()) continue;
+              if (field === 'DOI') continue;
+              fields[field] = proposed;
+            }
+            entry.fields = fields;
+            if (!Object.keys(fields).length) { entry.status = 'skipped'; entry.errorCode = 'NO_MISSING_FIELDS'; }
+          } catch (error) { entry.status = error instanceof NativeOperationError && error.code === 'CONFLICT' ? 'failed' : 'failed'; entry.errorCode = errorCode(error); }
+          await this.save(task);
+        }
+        if (task.state !== 'cancelled') task.state = task.items.some(item => item.status === 'candidate') ? 'review' : task.items.some(item => item.status === 'failed') ? 'partial' : 'completed';
+        await this.save(task); return clone(task);
+      } finally { this.active.delete(task.id); }
+    });
+  };
+  planChildNotes: ActionTasks['planChildNotes'] = value => {
+    const input = clone(value);
+    if (!Array.isArray(input.proposals) || !input.proposals.length || input.proposals.length > 50) invalid();
+    const proposals = input.proposals.map(proposal => {
+      const p = record(proposal, ['parent', 'body']);
+      return { parent: plainItemSnapshot(p.parent), body: text(p.body, 24000, 1).trim() };
+    });
+    const identities = proposals.map(item => `${item.parent.clientId}:${item.parent.libraryId}:${item.parent.key}`);
+    if (new Set(identities).size !== identities.length || new Set(proposals.map(item => `${item.parent.clientId}:${item.parent.libraryId}`)).size !== 1) invalid();
+    const requestID = input.modelRequestId === undefined ? undefined : id(input.modelRequestId);
+    return this.serial(async () => {
+      if (requestID) {
+        let bytes: Uint8Array | null; try { bytes = await this.storage.read(this.path(requestID)); } catch { unavailable(); }
+        if (bytes) {
+          const stored = await this.load(requestID);
+          if (stored.kind !== 'child-notes' || stored.modelRequestId !== requestID || stored.conversationId !== id(input.conversationId) || stored.question !== text(input.question, 16000) || !equal(stored.items.map(item => ({ parent: item.parent, body: item.body })), proposals)) throw new ReaderError('REQUEST_CONFLICT', 'This model request already belongs to a different note task.');
+          return this.recovered(stored);
+        }
+      }
+      const task: Extract<ActionTaskRecord, { kind: 'child-notes' }> = { ...this.base(id(input.conversationId), text(input.question, 16000)), ...(requestID ? { id: requestID, modelRequestId: requestID } : {}), kind: 'child-notes', items: proposals.map(({ parent, body }) => ({ kind: 'child-note', id: id(this.clock.uuid()), reservedKey: key(this.clock.key()), status: 'candidate', parent, body })) };
+      const abort = await this.begin(task);
+      try {
+        for (const item of task.items) {
+          if (abort.signal.aborted || this.stopRequests.has(task.id)) { task.cancelRequested = true; task.state = 'cancelled'; break; }
+          const current = await readWhileActive(this.native.inspectItem(item.parent, abort.signal), abort.signal);
+          if (!current || !equal(current, item.parent)) { item.status = 'failed'; item.errorCode = 'CONFLICT'; }
+          await this.save(task);
+        }
+        if (task.state !== 'cancelled') task.state = task.items.some(item => item.status === 'candidate') ? 'review' : 'failed';
+        await this.save(task); return clone(task);
+      } finally { this.active.delete(task.id); }
+    });
+  };
+  planFigureAnnotations: ActionTasks['planFigureAnnotations'] = value => {
+    const input = clone(value);
+    const selection = figureSelection(input.selection);
+    const image = figureImage(input.image, selection);
+    if (!Array.isArray(input.proposals) || !input.proposals.length || input.proposals.length > 5) invalid();
+    const proposals = input.proposals.map(validateFigureCalloutProposal);
+    const conversationId = id(input.conversationId); const question = text(input.question, 16000);
+    const requestID = input.modelRequestId === undefined ? undefined : id(input.modelRequestId);
+    return this.serial(async () => {
+      if (requestID) {
+        let bytes: Uint8Array | null; try { bytes = await this.storage.read(this.path(requestID)); } catch { unavailable(); }
+        if (bytes) {
+          const stored = await this.load(requestID);
+          if (stored.kind !== 'figure-annotations' || stored.modelRequestId !== requestID || stored.conversationId !== conversationId || stored.question !== question || !equal(stored.selection, selection) || !equal(stored.image, image) || !equal(stored.items.map(item => item.proposal), proposals)) throw new ReaderError('REQUEST_CONFLICT', 'This model request already belongs to a different figure explanation task.');
+          return this.recovered(stored);
+        }
+      }
+      const items: FigureCalloutTaskItem[] = proposals.map(proposal => {
+        const reservedKey = key(this.clock.key()); const inkKey = key(this.clock.key());
+        if (inkKey === reservedKey) invalid();
+        return { kind: 'figure-callout', id: id(this.clock.uuid()), reservedKey, inkKey, status: 'candidate', proposal };
+      });
+      const task: Extract<ActionTaskRecord, { kind: 'figure-annotations' }> = { ...this.base(conversationId, question), ...(requestID ? { id: requestID, modelRequestId: requestID } : {}), kind: 'figure-annotations', selection, image, items };
+      const abort = await this.begin(task);
+      try {
+        if (abort.signal.aborted || this.stopRequests.has(task.id)) { task.cancelRequested = true; task.state = 'cancelled'; }
+        else task.state = 'review';
+        await this.save(task); return clone(task);
+      } finally { this.active.delete(task.id); }
+    });
+  };
+  planCollectionCreate: ActionTasks['planCollectionCreate'] = value => {
+    const input = clone(value); const target = collectionCreateTarget(input.target); const name = safeCollectionName(input.name);
+    return this.serial(async () => {
+      const task: Extract<ActionTaskRecord, { kind: 'collection-create' }> = {
+        ...this.base(id(input.conversationId), text(input.question, 16000)),
+        kind: 'collection-create',
+        items: [{ kind: 'collection-create', id: id(this.clock.uuid()), reservedKey: key(this.clock.key()), status: 'candidate', target, name }],
+      };
+      const abort = await this.begin(task);
+      try {
+        if (abort.signal.aborted || this.stopRequests.has(task.id)) { task.cancelRequested = true; task.state = 'cancelled'; }
+        else task.state = 'review';
+        await this.save(task); return clone(task);
+      } finally { this.active.delete(task.id); }
+    });
+  };
   planAcquisition: ActionTasks['planAcquisition'] = value => {
     const input = clone(value); if (!Array.isArray(input.identifiers) || input.identifiers.length > 50) invalid();
     const identifiers = [...new Set(input.identifiers.map(value => text(value, 8192, 1).trim()))];
@@ -315,8 +561,8 @@ export class ActionTaskController implements ActionTasks {
       } finally { this.active.delete(task.id); }
     });
   };
-  private async write<T>(task: ActionTaskRecord, item: AnnotationTaskItem | AcquisitionTaskItem | OrganizationTaskItem, operation: ActionTaskOperation, run: () => Promise<T>): Promise<{ ok: true; value: T } | { ok: false }> {
-    item.status = operation.endsWith('delete') || operation.endsWith('remove') || operation.endsWith('trash') ? 'undoing' : 'writing'; item.operation = operation; delete item.errorCode;
+  private async write<T>(task: ActionTaskRecord, item: AnnotationTaskItem | AcquisitionTaskItem | OrganizationTaskItem | MetadataUpdateTaskItem | ChildNoteTaskItem | FigureCalloutTaskItem | CollectionCreateTaskItem, operation: ActionTaskOperation, run: () => Promise<T>): Promise<{ ok: true; value: T } | { ok: false }> {
+    item.status = operation.endsWith('delete') || operation.endsWith('remove') || operation.endsWith('trash') || operation === 'metadata-restore' ? 'undoing' : 'writing'; item.operation = operation; delete item.errorCode;
     await this.save(task);
     try { return { ok: true, value: await run() }; }
     catch (error) {
@@ -347,7 +593,12 @@ export class ActionTaskController implements ActionTasks {
           if (!item.choice.duplicateKey && duplicates.length > 1) invalid();
           if (!item.choice.duplicateKey && duplicates.length === 1) item.choice.duplicateKey = duplicates[0]!.key;
         } else {
-          if (task.kind !== 'organization' || (!item.proposal.tags.length && !item.proposal.collections.length)) invalid();
+          if (item.kind === 'organization') { if (task.kind !== 'organization' || (!item.proposal.tags.length && !item.proposal.collections.length)) invalid(); }
+          else if (item.kind === 'metadata-update') { if (task.kind !== 'metadata-update' || !Object.keys(item.fields).length) invalid(); }
+          else if (item.kind === 'child-note') { if (task.kind !== 'child-notes' || !item.body.trim()) invalid(); }
+          else if (item.kind === 'collection-create') { if (task.kind !== 'collection-create' || safeCollectionName(item.name) !== item.name) invalid(); collectionCreateTarget(item.target); }
+          else if (item.kind === 'figure-callout') { if (task.kind !== 'figure-annotations' || !item.inkKey || !item.proposal.explanation) invalid(); }
+          else invalid();
         }
       }
       task.approvedAt = this.clock.now(); task.state = 'running';
@@ -367,6 +618,19 @@ export class ActionTaskController implements ActionTasks {
           else if (item.kind === 'organization' && task.kind === 'organization') {
             const result = await this.write(task, item, 'organization-add', () => this.native.organizeItem({ expected: item.before, tags: item.proposal.tags, collections: item.proposal.collections }, abort.signal));
             if (result.ok) { item.change = result.value; item.status = 'applied'; await this.save(task); }
+          } else if (item.kind === 'metadata-update' && task.kind === 'metadata-update') {
+            const result = await this.write(task, item, 'metadata-fill', () => this.native.fillMissingMetadata({ expected: item.before, fields: item.fields }, abort.signal));
+            if (result.ok) { item.change = result.value; item.status = 'applied'; await this.save(task); }
+          } else if (item.kind === 'child-note' && task.kind === 'child-notes') {
+            const result = await this.write(task, item, 'child-note-create', () => this.native.createChildNote({ parent: item.parent, key: item.reservedKey, body: item.body }, abort.signal));
+            if (result.ok) { item.note = result.value; item.status = 'applied'; await this.save(task); }
+          } else if (item.kind === 'collection-create' && task.kind === 'collection-create') {
+            const result = await this.write(task, item, 'collection-create', () => this.native.createCollection({ target: item.target, key: item.reservedKey, name: item.name }, abort.signal));
+            if (result.ok) { item.collection = result.value; item.status = 'applied'; await this.save(task); }
+          } else if (item.kind === 'figure-callout' && task.kind === 'figure-annotations') {
+            const input: NativeFigureCalloutInput = { selection: task.selection, image: task.image, proposal: item.proposal, index: task.items.indexOf(item), imageKey: item.reservedKey, inkKey: item.inkKey };
+            const result = await this.write(task, item, 'figure-callout-create', () => this.native.createFigureCallout(input, abort.signal));
+            if (result.ok) { item.callout = result.value; item.status = 'applied'; await this.save(task); }
           }
           if (['uncertain'].includes(item.status)) break;
         }
@@ -474,6 +738,50 @@ export class ActionTaskController implements ActionTasks {
             if (current && current.organizationSignature === item.change.before.organizationSignature && equal(current.metadata, item.change.before.metadata) && equal(current.tags, item.change.before.tags) && equal(current.collectionKeys, item.change.before.collectionKeys) && equal(current.attachmentKeys, item.change.before.attachmentKeys)) { item.status = 'undone'; delete item.errorCode; }
             else { item.status = 'conflict'; item.errorCode = 'REMOVAL_NOT_CONFIRMED'; }
           } else { item.status = 'uncertain'; item.errorCode = 'ORGANIZATION_RESULT_UNCONFIRMED'; }
+        } else if (item.kind === 'metadata-update' && task.kind === 'metadata-update') {
+          const current = await this.native.inspectItem(item.before);
+          if (item.operation === 'metadata-fill') {
+            if (item.change && current && equal(current, item.change.after)) { item.status = 'applied'; delete item.errorCode; }
+            else if (!current) { item.status = 'failed'; item.errorCode = 'NOT_FOUND'; }
+            else if (equal(current, item.before)) { item.status = 'failed'; item.errorCode = 'WRITE_NOT_OBSERVED'; }
+            else { item.status = 'uncertain'; item.errorCode = 'OUTPUT_UNCONFIRMED'; }
+          } else if (item.operation === 'metadata-restore' && item.change) {
+            if (current && equal(current.metadata, item.change.before.metadata) && equal(current.collectionKeys, item.change.before.collectionKeys) && equal(current.attachmentKeys, item.change.before.attachmentKeys)) { item.status = 'undone'; delete item.errorCode; }
+            else { item.status = 'conflict'; item.errorCode = 'REMOVAL_NOT_CONFIRMED'; }
+          } else { item.status = 'uncertain'; item.errorCode = 'METADATA_RESULT_UNCONFIRMED'; }
+        } else if (item.kind === 'child-note' && task.kind === 'child-notes') {
+          const ref = { clientId: item.parent.clientId, libraryId: item.parent.libraryId, key: item.reservedKey, parentKey: item.parent.key };
+          const current = await this.native.inspectChildNote(ref);
+          if (item.operation === 'child-note-create') {
+            if (current && current.body === childNoteHTML(item.body) && current.body.includes('data-zchatgpt-provenance="zotero-chatgpt"')) { item.note = current; item.status = 'applied'; delete item.errorCode; }
+            else { item.status = current ? 'conflict' : 'failed'; item.errorCode = current ? 'OUTPUT_CHANGED' : 'WRITE_NOT_OBSERVED'; }
+          } else if (item.operation === 'child-note-trash' && item.note) {
+            if (!current) { item.status = 'undone'; delete item.errorCode; }
+            else { item.status = 'conflict'; item.errorCode = 'REMOVAL_NOT_CONFIRMED'; }
+          } else { item.status = 'uncertain'; item.errorCode = 'NOTE_RESULT_UNCONFIRMED'; }
+        } else if (item.kind === 'collection-create' && task.kind === 'collection-create') {
+          const current = await this.native.inspectCollection({ clientId: item.target.clientId, libraryId: item.target.libraryId, collectionKey: item.reservedKey });
+          if (item.operation === 'collection-create') {
+            if (current && current.name === item.name && current.parentKey === item.target.parentCollectionKey && current.childItemKeys.length === 0 && current.childCollectionKeys.length === 0) { item.collection = current; item.status = 'applied'; delete item.errorCode; }
+            else { item.status = current ? 'conflict' : 'failed'; item.errorCode = current ? 'OUTPUT_CHANGED' : 'WRITE_NOT_OBSERVED'; }
+          } else if (item.operation === 'collection-trash') {
+            if (!current) { item.status = 'undone'; delete item.errorCode; }
+            else { item.status = 'conflict'; item.errorCode = 'REMOVAL_NOT_CONFIRMED'; }
+          } else { item.status = 'uncertain'; item.errorCode = 'COLLECTION_RESULT_UNCONFIRMED'; }
+        } else if (item.kind === 'figure-callout' && task.kind === 'figure-annotations') {
+          const input: NativeFigureCalloutInput = { selection: task.selection, image: task.image, proposal: item.proposal, index: task.items.indexOf(item), imageKey: item.reservedKey, inkKey: item.inkKey };
+          const current = await this.native.inspectFigureCallout(input);
+          if (item.operation === 'figure-callout-create') {
+            if (current.status === 'complete') { item.callout = current.callout; item.status = 'applied'; delete item.errorCode; }
+            else if (current.status === 'absent') { item.status = 'failed'; item.errorCode = 'WRITE_NOT_OBSERVED'; }
+            else if (current.status === 'partial') { item.status = 'uncertain'; item.errorCode = 'FIGURE_PARTIAL_WRITE'; }
+            else { item.status = 'conflict'; item.errorCode = 'OUTPUT_CHANGED'; }
+          } else if (item.operation === 'figure-callout-delete') {
+            if (current.status === 'absent') { item.status = 'undone'; delete item.errorCode; }
+            else if (current.status === 'complete' && item.callout && equal(figureNativeData(current.callout), figureNativeData(item.callout))) { item.status = 'applied'; item.errorCode = 'REMOVAL_NOT_OBSERVED'; }
+            else if (current.status === 'partial') { item.status = 'uncertain'; item.errorCode = 'FIGURE_PARTIAL_REMOVAL'; }
+            else { item.status = 'conflict'; item.errorCode = 'REMOVAL_NOT_CONFIRMED'; }
+          } else { item.status = 'uncertain'; item.errorCode = 'FIGURE_RESULT_UNCONFIRMED'; }
         }
       } catch { item.status = 'uncertain'; item.errorCode = 'INSPECTION_UNAVAILABLE'; }
       await this.save(task);
@@ -518,6 +826,22 @@ export class ActionTaskController implements ActionTasks {
         } else if (item.kind === 'organization' && item.change) {
           const expected = item.change;
           const result = await this.write(task, item, 'organization-remove', () => this.native.undoOrganization({ expected }, abort.signal));
+          if (result.ok) { item.status = result.value.status === 'conflict' ? 'conflict' : 'undone'; if (item.status === 'conflict') item.errorCode = 'OUTPUT_CHANGED'; else delete item.errorCode; await this.save(task); }
+        } else if (item.kind === 'metadata-update' && item.change) {
+          const expected = item.change;
+          const result = await this.write(task, item, 'metadata-restore', () => this.native.undoMetadataFill({ expected }, abort.signal));
+          if (result.ok) { item.status = result.value.status === 'conflict' ? 'conflict' : 'undone'; if (item.status === 'conflict') item.errorCode = 'OUTPUT_CHANGED'; else delete item.errorCode; await this.save(task); }
+        } else if (item.kind === 'child-note' && item.note) {
+          const expected = item.note;
+          const result = await this.write(task, item, 'child-note-trash', () => this.native.undoChildNote({ expected }, abort.signal));
+          if (result.ok) { item.status = result.value.status === 'conflict' ? 'conflict' : 'undone'; if (item.status === 'conflict') item.errorCode = 'OUTPUT_CHANGED'; else delete item.errorCode; await this.save(task); }
+        } else if (item.kind === 'collection-create' && item.collection) {
+          const expected = item.collection;
+          const result = await this.write(task, item, 'collection-trash', () => this.native.undoCreatedCollection({ expected }, abort.signal));
+          if (result.ok) { item.status = result.value.status === 'conflict' ? 'conflict' : 'undone'; if (item.status === 'conflict') item.errorCode = 'OUTPUT_CHANGED'; else delete item.errorCode; await this.save(task); }
+        } else if (item.kind === 'figure-callout' && item.callout && task.kind === 'figure-annotations') {
+          const expected = item.callout;
+          const result = await this.write(task, item, 'figure-callout-delete', () => this.native.deleteFigureCallout({ expected }, abort.signal));
           if (result.ok) { item.status = result.value.status === 'conflict' ? 'conflict' : 'undone'; if (item.status === 'conflict') item.errorCode = 'OUTPUT_CHANGED'; else delete item.errorCode; await this.save(task); }
         }
         if (item.status === 'uncertain') break;

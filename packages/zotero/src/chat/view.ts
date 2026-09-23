@@ -8,7 +8,7 @@ import { EXPLAIN_QUESTION } from '../../../core/src/codex/reader-policy.ts';
 import { hasBibliographicIdentity } from '../../../core/src/chat/paper-context.ts';
 import type { ConversationPresenter, PresenterState } from './presenter.ts';
 import {
-  alignSettings, applyComposerChoice, composerControls, effortLabel, modelChipLabel, resolveFastTier, settingsCaption,
+  alignSettings, applyComposerChoice, catalogDefaultSettings, composerControls, effortLabel, modelChipLabel, resolveFastTier, settingsCaption,
 } from './generation-settings.ts';
 import { enforcedAllowedModelIds } from '../../../core/src/workspace/allowed-models.ts';
 import { copyableAnswerText, followAnswerScroll, renderAnswer } from './render-answer.ts';
@@ -70,6 +70,8 @@ export interface ChatViewHooks {
   uuid?(): string;
   /** Present when Chat mode hosts the real ChatGPT web application instead of the native composer. */
   chatEmbed?: ChatEmbedHook;
+  /** Explicit Agent Figure request: the reader first asks the user to drag over one Figure. */
+  explainFigure?(question: string): Promise<void>;
 }
 const HTML = 'http://www.w3.org/1999/xhtml';
 const SVG = 'http://www.w3.org/2000/svg';
@@ -141,6 +143,9 @@ const COPY = {
   skillHeading: 'Skill',
   addReferenceHint: 'Saved chats and articles',
   addSkillHint: 'Installed skills for this chat',
+  figureHeading: 'Figure',
+  explainFigure: 'Explain and mark a Figure…',
+  explainFigureHint: 'Drag over one Figure, then review native callouts',
   // Local reading status. The sidebar used to render preparation state in a panel that was removed,
   // which made a successful whole-PDF read invisible: nothing on screen changed, so an owner could
   // not tell that their article had been read. These lines report the read that actually happened,
@@ -185,15 +190,14 @@ const COPY = {
   // Agent empty state (UI-05). Purpose copy plus three lightweight entries that only prepare a draft
   // or open the scope the task needs; none of them sends, connects to a model, downloads or writes.
   agentEmptyTitle: 'Ask Codex about this paper',
-  agentEmptyBody: 'Answers stay in this sidebar. Highlighting, article retrieval and library organization only run after you review and approve a proposed task.',
+  agentEmptyBody: 'Ask about this PDF or choose an action.',
   agentEmptyHighlight: 'Highlight key points',
-  agentEmptyHighlightHint: 'Draft a request for the current PDF',
-  agentEmptyAcquire: 'Get an article',
-  agentEmptyAcquireHint: 'Draft a request for a DOI or public URL',
-  agentEmptyOrganize: 'Organize selected items',
-  agentEmptyOrganizeHint: 'Uses the selection in the Zotero main window',
+  agentEmptyHighlightHint: 'Mark verified passages',
+  agentEmptyExplain: 'Explain this paper',
+  agentEmptyExplainHint: 'Content or passages',
+  agentEmptyFigure: 'Explain a Figure',
+  agentEmptyFigureHint: 'Select a region',
   agentEmptyHighlightMissing: 'Open a PDF in the reader before asking for highlights.',
-  agentEmptyOrganizeMissing: 'Select items in the Zotero main window first.',
   agentEmptyDraftReady: 'Draft prepared below. Nothing has been sent.',
   imageSaveFailed: 'The image could not be saved.',
   imageClipboardFailed: 'The clipboard image could not be attached.',
@@ -858,8 +862,8 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   transcript.append(messages, newContent);
   /**
    * Agent's empty state (UI-05). Compact and explanatory, not a marketing hero: a short title, one
-   * purpose line, and three lightweight entries. Each entry only prepares a draft for the owner to
-   * edit and send — none of them connects a model, downloads, writes, or submits anything.
+   * purpose line, and three PDF-specific entries. The text/highlight entries prepare editable
+   * drafts; Figure starts the explicit region-selection workflow when its native hook is available.
    */
   const empty = el('div', 'zchatgpt-agent-empty'); empty.dataset.zchatgptAgentEmpty = ''; empty.hidden = true;
   const emptyCard = el('div', 'zchatgpt-agent-empty-card');
@@ -867,22 +871,25 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   const emptyBody = el('p', 'zchatgpt-agent-empty-body', COPY.agentEmptyBody);
   const emptyActions = el('div', 'zchatgpt-agent-empty-actions');
   const emptyNote = el('p', 'zchatgpt-agent-empty-note'); emptyNote.setAttribute('role', 'status'); emptyNote.hidden = true;
-  const emptyAction = (title: string, hint: string, question: string, action: string) => {
+  const emptyAction = (title: string, hint: string, action: string, onClick: () => void) => {
     const node = el('button', 'zchatgpt-agent-empty-action');
     node.type = 'button'; node.dataset.zchatgptAction = action;
     node.append(el('span', 'zchatgpt-agent-empty-action-title', title), el('span', 'zchatgpt-agent-empty-action-hint', hint));
-    node.addEventListener('click', () => {
-      // Prepare the draft only. The owner still edits and sends it; nothing is submitted here.
-      presenter.setQuestion(question);
-      emptyNote.textContent = COPY.agentEmptyDraftReady; emptyNote.hidden = false;
-      presenter.focusInput();
-    });
+    node.addEventListener('click', onClick);
     return node;
   };
+  const prepareEmptyDraft = (question: string) => {
+    presenter.setQuestion(question);
+    emptyNote.textContent = COPY.agentEmptyDraftReady; emptyNote.hidden = false;
+    presenter.focusInput();
+  };
   emptyActions.append(
-    emptyAction(COPY.agentEmptyHighlight, COPY.agentEmptyHighlightHint, 'Highlight the most important passages in the current PDF and explain each one briefly.', 'empty-highlight'),
-    emptyAction(COPY.agentEmptyAcquire, COPY.agentEmptyAcquireHint, 'Save this article to a collection and download an available PDF: ', 'empty-acquire'),
-    emptyAction(COPY.agentEmptyOrganize, COPY.agentEmptyOrganizeHint, 'Tag the items I selected in the Zotero window and add them to suitable existing collections.', 'empty-organize'),
+    emptyAction(COPY.agentEmptyExplain, COPY.agentEmptyExplainHint, 'empty-explain', () => prepareEmptyDraft('Explain the central argument and methods of this paper.')),
+    emptyAction(COPY.agentEmptyHighlight, COPY.agentEmptyHighlightHint, 'empty-highlight', () => prepareEmptyDraft('Highlight the most important passages in the current PDF and explain each one briefly.')),
+    emptyAction(COPY.agentEmptyFigure, COPY.agentEmptyFigureHint, 'empty-figure', () => {
+      if (hooks.explainFigure) void hooks.explainFigure('Explain the selected Figure and mark its key visual components.').catch(reportViewError);
+      else reportViewError(new Error('Figure selection is unavailable in this Reader.'));
+    }),
   );
   emptyCard.append(emptyTitle, emptyBody, emptyActions, emptyNote);
   empty.append(emptyCard);
@@ -1008,7 +1015,15 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     el('div', 'zchatgpt-plus-heading', COPY.skillHeading),
     plusRow(COPY.addSkill, COPY.addSkillHint, 'composer-skill', () => { togglePlus(false); workspaceView?.openSkills(); }),
   );
-  plusMenu.append(attachGroup, referenceGroup, skillGroup);
+  const figureGroup = el('div', 'zchatgpt-plus-group'); figureGroup.hidden = !hooks.explainFigure;
+  if (hooks.explainFigure) figureGroup.append(
+    el('div', 'zchatgpt-plus-heading', COPY.figureHeading),
+    plusRow(COPY.explainFigure, COPY.explainFigureHint, 'explain-figure', () => {
+      togglePlus(false);
+      void hooks.explainFigure!(input.value.trim() || 'Explain the selected Figure and mark the key visual components.').catch(reportViewError);
+    }),
+  );
+  plusMenu.append(attachGroup, referenceGroup, skillGroup, figureGroup);
   composer.append(plusMenu);
   // Agent keeps only the attachment `+` at the composer's start: the one Chat/Agent switch lives in
   // the common shell above, never here and never twice.
@@ -2057,8 +2072,8 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   }
   const renderPicker = (state: PresenterState, signedIn: boolean) => {
     const models = state.runtime?.models ?? [];
-    const selectedSettings = state.draft.settings ?? state.conversation?.settings ?? null;
     const allowedIds = enforcedAllowedModelIds(state.workspace?.allowedModels);
+    const selectedSettings = state.draft.settings ?? state.conversation?.settings ?? catalogDefaultSettings(models, allowedIds);
     const current = selectedSettings && models.length ? alignSettings(models, selectedSettings, allowedIds) : selectedSettings;
     const controls = composerControls(models, current, allowedIds);
     const selected = current ? models.find(entry => entry.id === current.model) : undefined;
@@ -2092,7 +2107,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
       row.disabled = !signedIn || !!effortCtl?.disabled;
       row.addEventListener('click', () => {
         const latest = presenter.snapshot();
-        const settings = latest.draft.settings ?? latest.conversation?.settings;
+        const settings = latest.draft.settings ?? latest.conversation?.settings ?? catalogDefaultSettings(latest.runtime?.models ?? [], enforcedAllowedModelIds(latest.workspace?.allowedModels));
         if (!settings) return;
         presenter.setSettings(applyComposerChoice(latest.runtime?.models ?? [], settings, 'effort', option.value, enforcedAllowedModelIds(latest.workspace?.allowedModels)));
         keepPicker('effort', option.value);
@@ -2117,7 +2132,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
       toggle.addEventListener('click', event => {
         event.stopPropagation();
         const latest = presenter.snapshot();
-        const settings = latest.draft.settings ?? latest.conversation?.settings;
+        const settings = latest.draft.settings ?? latest.conversation?.settings ?? catalogDefaultSettings(latest.runtime?.models ?? [], enforcedAllowedModelIds(latest.workspace?.allowedModels));
         if (!settings) return;
         presenter.setSettings(applyComposerChoice(latest.runtime?.models ?? [], settings, 'speed', on ? '' : fast.id, enforcedAllowedModelIds(latest.workspace?.allowedModels)));
         menu.querySelector<HTMLButtonElement>('[data-zchatgpt-setting="speed"]')?.focus();
@@ -2142,7 +2157,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
       row.disabled = !signedIn || !!modelCtl?.disabled;
       row.addEventListener('click', () => {
         const latest = presenter.snapshot();
-        const settings = latest.draft.settings ?? latest.conversation?.settings;
+        const settings = latest.draft.settings ?? latest.conversation?.settings ?? catalogDefaultSettings(latest.runtime?.models ?? [], enforcedAllowedModelIds(latest.workspace?.allowedModels));
         if (!settings) return;
         presenter.setSettings(applyComposerChoice(latest.runtime?.models ?? [], settings, 'model', option.value, enforcedAllowedModelIds(latest.workspace?.allowedModels)));
         keepPicker('model', option.value);
@@ -2396,7 +2411,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
       menu.dataset.rendered = pickerKey;
       renderPicker(state, signedIn);
     }
-    const summary = modelChipLabel(state.draft.settings ?? state.conversation?.settings ?? null, state.runtime?.models ?? [], enforcedAllowedModelIds(state.workspace?.allowedModels));
+    const summary = modelChipLabel(state.draft.settings ?? state.conversation?.settings ?? catalogDefaultSettings(state.runtime?.models ?? [], enforcedAllowedModelIds(state.workspace?.allowedModels)), state.runtime?.models ?? [], enforcedAllowedModelIds(state.workspace?.allowedModels));
     if (picker.dataset.summary !== summary) {
       picker.dataset.summary = summary;
       picker.replaceChildren(doc.createTextNode(summary));

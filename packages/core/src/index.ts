@@ -12,6 +12,8 @@ import { ConversationStore } from './sessions/store.ts';
 import { ReaderService } from './sessions/service.ts';
 export { shareableDiagnostics } from './sessions/diagnostics.ts';
 export type { ShareableDiagnostics } from './sessions/diagnostics.ts';
+export { discoverScholarlyWorks } from './discovery/scholarly.ts';
+export type { ScholarlyDiscoveryCandidate, ScholarlyDiscoveryPort, ScholarlyDiscoveryPreview, ScholarlyDiscoveryRequest } from '../../contracts/src/discovery.ts';
 /**
  * `codexHome`, when known to the caller, must equal the account directory the runtime reports.
  * `chatTransport` injects the Chat backend; the default is the honest unavailable placeholder, so

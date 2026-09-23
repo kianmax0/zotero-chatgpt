@@ -1,6 +1,8 @@
 import { clone } from '../../../contracts/src/clone.ts';
-import { type NativeAnnotationPosition, type NativeAnnotationSnapshot, type NativeItemRef, type NativeItemSnapshot, type NativeMetadata, type NativeOperationErrorCode, NativeOperationError, type NativeOrganizationItemSnapshot, type NativeCreator } from '../../../contracts/src/native.ts';
+import { NATIVE_ANNOTATION_PROVENANCE, type NativeAnnotationPosition, type NativeAnnotationSnapshot, type NativeFigureAnnotationPosition, type NativeFigureAnnotationRecord, type NativeFigureAnnotationSnapshot, type NativeFigureCalloutInput, type NativeFigureCalloutPrepared, type NativeItemRef, type NativeItemSnapshot, type NativeMetadata, type NativeOperationErrorCode, NativeOperationError, type NativeOrganizationItemSnapshot, type NativeCreator } from '../../../contracts/src/native.ts';
 import type { DocumentRevision, PaperScope, Rect } from '../../../contracts/src/index.ts';
+import { validateImageAttachment } from '../../../contracts/src/validation.ts';
+import { cleanAnnotationReason, validateFigureCalloutProposal } from '../../../contracts/src/tasks.ts';
 import { nativeDocumentSource, type DocumentSource } from '../reader/document.ts';
 import type { ZoteroHost } from '../reader/host-types.ts';
 import type { HostEnvironment, HostHTTPOptions, HostHTTPResponse, NativeHostItem, NativeZoteroHost } from '../host/native.ts';
@@ -64,6 +66,25 @@ export function position(value: unknown): NativeAnnotationPosition {
   }
   return result;
 }
+function figurePosition(value: unknown, type: 'image' | 'ink'): NativeFigureAnnotationPosition {
+  const p = object(value);
+  if (!Number.isSafeInteger(p.pageIndex) || (p.pageIndex as number) < 0) fail('INVALID_INPUT', 'Invalid figure annotation page.');
+  if (type === 'image') {
+    if (!Array.isArray(p.rects) || p.rects.length !== 1) fail('INVALID_INPUT', 'A figure area must contain one rectangle.');
+    const one = rect(p.rects[0]); if (!one) fail('INVALID_INPUT', 'Invalid figure area bounds.');
+    return { pageIndex: p.pageIndex as number, rects: [one] };
+  }
+  if (!Array.isArray(p.paths) || !p.paths.length || p.paths.length > 5 || typeof p.width !== 'number' || !Number.isFinite(p.width) || p.width <= 0 || p.width > 100) fail('INVALID_INPUT', 'Invalid figure ink geometry.');
+  const paths: number[][] = p.paths.map(raw => {
+    if (!Array.isArray(raw) || raw.length < 4 || raw.length > 128 || raw.length % 2 || !raw.every(n => typeof n === 'number' && Number.isFinite(n) && Math.abs(n) < 1_000_000)) fail('INVALID_INPUT', 'Invalid figure ink path.');
+    return raw.map(n => Math.round(n * 1000) / 1000);
+  });
+  return { pageIndex: p.pageIndex as number, paths, width: Math.round(p.width * 1000) / 1000 };
+}
+async function sha256Text(value: string): Promise<string> {
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value)));
+  return [...digest].map(byte => byte.toString(16).padStart(2, '0')).join('');
+}
 export async function waitRead<T>(work: Promise<T>, signal?: AbortSignal): Promise<T> {
   checkSignal(signal); if (!signal) return work;
   let abort = () => {};
@@ -105,6 +126,9 @@ export interface NativeSupport {
   getItem(ref: NativeItemRef): NativeHostItem | null;
   contentSignature(item: NativeHostItem): string;
   annotationSnapshot(paper: PaperScope, item: NativeHostItem): NativeAnnotationSnapshot | null;
+  prepareFigureCallout(input: NativeFigureCalloutInput, signal?: AbortSignal): Promise<NativeFigureCalloutPrepared>;
+  figureAnnotationRecord(paper: PaperScope, item: NativeHostItem): NativeFigureAnnotationRecord | null;
+  figureAnnotationSnapshot(paper: PaperScope, item: NativeHostItem): Promise<NativeFigureAnnotationSnapshot | null>;
 }
 
 export function createNativeSupport(options: NativeSupportOptions): NativeSupport {
@@ -195,5 +219,66 @@ export function createNativeSupport(options: NativeSupportOptions): NativeSuppor
     if (item.deleted || !item.isAnnotation() || item.parentID !== parent.id || !['highlight', 'underline'].includes(item.annotationType)) return null;
     return { paper: clone(p), key: item.key, type: item.annotationType as 'highlight' | 'underline', text: item.annotationText ?? '', comment: item.annotationComment ?? '', color: item.annotationColor ?? '', pageLabel: item.annotationPageLabel ?? '', sortIndex: item.annotationSortIndex ?? '', position: position(JSON.parse(item.annotationPosition ?? '{}')), authorName: item.annotationAuthorName ?? '', isExternal: item.annotationIsExternal, tags: item.getTags().map(t => t.tag).sort(), dateModified: item.dateModified };
   };
-  return { clientId: options.clientId, z, environment, readURL, scope, paper, capture, cleanDOI, readMetadata, itemSnapshot, organizationItemSnapshot, getItem, contentSignature, annotationSnapshot };
+  const prepareFigureCallout = (value: NativeFigureCalloutInput, signal?: AbortSignal): Promise<NativeFigureCalloutPrepared> => boundary(async () => {
+    checkSignal(signal); const input = clone(value); key(input.imageKey); key(input.inkKey);
+    if (input.imageKey === input.inkKey || !Number.isSafeInteger(input.index) || input.index < 0 || input.index >= 5) fail('INVALID_INPUT', 'The figure callout identity is invalid.');
+    const selection = input.selection; paper(selection.paper);
+    if (!Number.isSafeInteger(selection.pageIndex) || selection.pageIndex < 0 || selection.pageIndex >= 10000 || !selection.revision || typeof selection.revision.fingerprint !== 'string' || !selection.revision.fingerprint || !Number.isSafeInteger(selection.revision.size) || selection.revision.size < 0 || !Number.isFinite(selection.revision.modifiedAt)) fail('INVALID_INPUT', 'The selected figure identity is invalid.');
+    const region = rect(selection.rect); if (!region) fail('INVALID_INPUT', 'The selected figure bounds are invalid.');
+    const image = validateImageAttachment(input.image);
+    if (image.mime !== 'image/png' || image.origin?.kind !== 'paper' || !equal(image.origin.paper, selection.paper) || image.origin.pageIndex !== selection.pageIndex || !equal(image.origin.revision, selection.revision)) fail('CONFLICT', 'The selected figure image does not match the frozen PDF region.');
+    const source = await waitRead(capture(selection.paper, signal), signal);
+    if (!revisionMatches(selection.revision, source.revision)) fail('SOURCE_CHANGED', 'The selected PDF changed after the figure was explained.');
+    if (selection.pageIndex >= source.pdf.numPages) fail('NOT_FOUND', 'The selected PDF page no longer exists.');
+    const pageData = await waitRead(source.pdf.getPageData({ pageIndex: selection.pageIndex }), signal);
+    const viewBox = pageData.viewBox;
+    if (!Array.isArray(viewBox) || viewBox.length !== 4 || !viewBox.every(Number.isFinite) || region[0] < viewBox[0]! || region[1] < viewBox[1]! || region[2] > viewBox[2]! || region[3] > viewBox[3]!) fail('INVALID_INPUT', 'The selected figure lies outside the current PDF page.');
+    const proposal = validateFigureCalloutProposal(input.proposal);
+    const width = region[2] - region[0]; const height = region[3] - region[1];
+    const normRect = proposal.box;
+    const pdfRect = rect([
+      region[0] + normRect[0] * width,
+      region[3] - normRect[3] * height,
+      region[0] + normRect[2] * width,
+      region[3] - normRect[1] * height,
+    ]);
+    if (!pdfRect || pdfRect[0] < viewBox[0]! || pdfRect[1] < viewBox[1]! || pdfRect[2] > viewBox[2]! || pdfRect[3] > viewBox[3]!) fail('INVALID_INPUT', 'The callout rectangle lies outside the selected PDF region.');
+    const labels = await waitRead(source.pdf.getPageLabels2(), signal);
+    const fresh = await waitRead(capture(selection.paper, signal), signal);
+    if (!revisionMatches(selection.revision, fresh.revision)) fail('SOURCE_CHANGED', 'The selected PDF changed while validating Figure callout coordinates.');
+    const pageLabel = labels?.[selection.pageIndex]?.trim() || String(selection.pageIndex + 1);
+    const top = Math.min(99999, Math.max(0, Math.floor(viewBox[3]! - pdfRect[3])));
+    const sortIndex = `${String(selection.pageIndex).padStart(5, '0')}|000000|${String(top).padStart(5, '0')}`;
+    const label = String.fromCharCode(65 + input.index);
+    const comment = `${NATIVE_ANNOTATION_PROVENANCE}\n${label}: ${cleanAnnotationReason(proposal.explanation)}`;
+    const color = '#7c5cff';
+    const imageSHA256 = await sha256Text(image.dataUrl);
+    const imageAnnotation: Omit<NativeFigureAnnotationSnapshot, 'dateModified'> = {
+      paper: clone(selection.paper), key: input.imageKey, type: 'image', comment, color, pageLabel, sortIndex,
+      position: { pageIndex: selection.pageIndex, rects: [pdfRect] }, authorName: '', isExternal: false, tags: [], imageSHA256,
+    };
+    const paths = proposal.strokes.map(stroke => stroke.flatMap(([x, y]) => [
+      Math.round((region[0] + x * width) * 1000) / 1000,
+      Math.round((region[3] - y * height) * 1000) / 1000,
+    ]));
+    const inkAnnotation: Omit<NativeFigureAnnotationSnapshot, 'dateModified'> = {
+      paper: clone(selection.paper), key: input.inkKey, type: 'ink', comment: `${NATIVE_ANNOTATION_PROVENANCE}\n${label} callout`, color, pageLabel, sortIndex,
+      position: figurePosition({ pageIndex: selection.pageIndex, paths, width: 2.5 }, 'ink'), authorName: '', isExternal: false, tags: [], imageSHA256,
+    };
+    return { selection: clone(selection), image: imageAnnotation, ink: inkAnnotation };
+  });
+  const figureAnnotationRecord = (p: PaperScope, item: NativeHostItem): NativeFigureAnnotationRecord | null => {
+    const parent = paper(p);
+    if (item.deleted || !item.isAnnotation() || item.parentID !== parent.id || !['image', 'ink'].includes(item.annotationType)) return null;
+    const type = item.annotationType as 'image' | 'ink';
+    const position = figurePosition(JSON.parse(item.annotationPosition ?? '{}'), type);
+    return { paper: clone(p), key: item.key, type, comment: item.annotationComment ?? '', color: item.annotationColor ?? '', pageLabel: item.annotationPageLabel ?? '', sortIndex: item.annotationSortIndex ?? '', position, authorName: item.annotationAuthorName ?? '', isExternal: item.annotationIsExternal, tags: item.getTags().map(t => t.tag).sort(), dateModified: item.dateModified };
+  };
+  const figureAnnotationSnapshot = async (p: PaperScope, item: NativeHostItem): Promise<NativeFigureAnnotationSnapshot | null> => {
+    const record = figureAnnotationRecord(p, item); if (!record) return null;
+    const serialized = await z.Annotations.toJSON(item);
+    if (typeof serialized.image !== 'string' || !/^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/u.test(serialized.image)) return null;
+    return { ...record, imageSHA256: await sha256Text(serialized.image) };
+  };
+  return { clientId: options.clientId, z, environment, readURL, scope, paper, capture, cleanDOI, readMetadata, itemSnapshot, organizationItemSnapshot, getItem, contentSignature, annotationSnapshot, prepareFigureCallout, figureAnnotationRecord, figureAnnotationSnapshot };
 }

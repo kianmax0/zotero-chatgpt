@@ -3,7 +3,7 @@ import { clone } from '../../../contracts/src/clone.ts';
 import { advanceRequestTiming, ReaderError, paperId, type Citation, type ContextReport, type Conversation, type DocumentContext, type GenerationSettings, type ImageAttachment, type Message, type OrganizationContext, type PaperIdentity, type PaperScope, type ReaderEvent, type RequestMode, type SendInput } from '../../../contracts/src/index.ts';
 import type { HistoryChange, HistoryEntry, LibraryReferencePort, Personalization, ReaderReference, ReaderSkill, ReaderWorkspace, ReferenceInput, ResearchProfile, SavedDraft, WorkflowSnapshot, WorkspaceDraft, WorkspaceSettings } from '../../../contracts/src/workspace.ts';
 import { citationFromAnnotation, parseAnnotationCandidates, parseOrganizationProposals, type ActionTaskChoices, type ActionTaskRecord, type ActionTasks } from '../../../contracts/src/tasks.ts';
-import type { NativeCollectionTarget, NativeItemRef } from '../../../contracts/src/native.ts';
+import type { NativeCollectionTarget, NativeFigureSelection, NativeItemRef } from '../../../contracts/src/native.ts';
 import { validatePreferences, validateReference, validateReferenceInput, validateWorkflow } from '../../../contracts/src/workspace-validation.ts';
 import { LIMITS, validateImageAttachment, validateOutputImage } from '../../../contracts/src/validation.ts';
 import { estimateRequestBudget, type ContextBudget } from '../../../core/src/codex/model-capabilities.ts';
@@ -68,6 +68,7 @@ export interface PresenterServices {
   getWorkspace?(): Promise<ReaderWorkspace>; library?: LibraryReferencePort; agent?: PresenterAgent;
   openHistory?(paper: PaperScope, conversationId: string): Promise<void>;
   openCitation?(citation: Citation): Promise<void>; openItem?(item: NativeItemRef): Promise<void>;
+  openFigurePage?(selection: NativeFigureSelection): Promise<void>;
   /**
    * Re-reads the bibliographic identity of one attachment from the local Zotero metadata, addressed
    * by the frozen `PaperScope` rather than "whatever the reader shows now". Optional: without it the
@@ -831,6 +832,10 @@ export class ConversationPresenter {
     const task = await (await this.getTasks()).get(id); const item = task.items.find(item => item.id === itemId);
     if (!item || item.status === 'undone') throw new ReaderError('NOT_FOUND', 'This task has no available recorded output.');
     if (item.kind === 'annotation' && item.annotation) { await this.openTaskSource(id, itemId); return; }
+    if (item.kind === 'figure-callout' && item.callout && task.kind === 'figure-annotations') {
+      if (!this.services.openFigurePage) throw new ReaderError('UNSUPPORTED_INTERACTION', 'Figure output navigation is unavailable.');
+      await this.services.openFigurePage(task.selection); return;
+    }
     if (item.kind === 'acquisition' && item.item) {
       if (item.acquisition?.status === 'attached' && !item.attachmentUndone && this.services.library) {
         const attachment = item.acquisition.attachment; await this.services.library.open({ clientId: attachment.clientId, libraryId: attachment.libraryId, attachmentKey: attachment.key }); return;

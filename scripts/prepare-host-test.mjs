@@ -27,7 +27,7 @@ function readRawOption(name) {
 }
 
 function positionalXpi() {
-  const flagsWithValue = new Set(['--upgrade-xpi', '--rollback-xpi', '--url', '--probe-timeout-ms', '--watch-seconds', '--run-id', '--login-wait-seconds', '--recover-organization', '--web-resume', '--request-id', '--expected-token', '--origin-version']);
+  const flagsWithValue = new Set(['--upgrade-xpi', '--rollback-xpi', '--url', '--probe-timeout-ms', '--watch-seconds', '--run-id', '--reuse-run-id', '--report-id', '--login-wait-seconds', '--recover-organization', '--web-resume', '--request-id', '--expected-token', '--origin-version']);
   const skip = new Set();
   const found = [];
   for (let index = 0; index < argumentsList.length; index += 1) {
@@ -106,6 +106,18 @@ const processes = execFileSync('ps', ['-axo', 'args='], { encoding: 'utf8' });
 if (processes.split('\n').some((line) => line.startsWith('/Applications/Zotero.app/Contents/MacOS/zotero ') && line.includes(` -profile ${profile}`))) {
   throw new Error('Close the dedicated Zotero test instance before preparing its profile.');
 }
+if (tree.reuseExisting) {
+  for (const target of [profile, dataDir]) {
+    const info = await lstat(target);
+    if (!info.isDirectory() || info.isSymbolicLink()) throw new Error('The reusable dedicated Zotero profile/data path is not a real directory');
+  }
+  try { await lstat(reportPath); throw new Error('The live report already exists; choose another --report-id'); }
+  catch (error) { if (error?.code !== 'ENOENT') throw error; }
+  const installed = join(profile, 'extensions', `${subjectID}.xpi`);
+  const current = createHash('sha256').update(await readFile(installed)).digest('hex');
+  const requested = createHash('sha256').update(await readFile(subjectXpi)).digest('hex');
+  if (current !== requested) throw new Error('The reusable dedicated profile has a different Zotero ChatGPT XPI; update it before the live test');
+}
 if (tree.exclusiveRoot) await reserveExclusiveRoot(tree.exclusiveRoot);
 await mkdir(join(profile, 'extensions'), { recursive: true });
 await mkdir(dataDir, { recursive: true });
@@ -134,7 +146,7 @@ if (!noFixtureWrite) await writeFile(pdfPath, createFixturePdf('ZCHATGPT synthet
 // checks whose precondition is that no runtime has been prepared yet.
 const liveRun = argumentsList.includes('--live') || tree.stage === 'live-core';
 const cleanRuntimeTree = tree.cleanRuntimeTree === true;
-const supplementPdfPath = ['context', 'live-core'].includes(tree.stage) ? join(pdfPath, '..', 'supplement.pdf') : undefined;
+const supplementPdfPath = ['context', 'live-core'].includes(tree.stage) ? tree.supplementPdfPath ?? join(pdfPath, '..', 'supplement.pdf') : undefined;
 if (supplementPdfPath) await writeFile(supplementPdfPath, createFixturePdf('ZCHATGPT synthetic supplement fixture', 'BAMBOO-19'));
 const prefs = {
   'extensions.zotero.useDataDir': true,
@@ -155,8 +167,10 @@ const prefs = {
   'browser.shell.checkDefaultBrowser': false,
   'browser.sessionstore.resume_from_crash': false,
 };
-await writeFile(join(profile, 'user.js'), Object.entries(prefs).map(([key, value]) => `user_pref(${JSON.stringify(key)}, ${JSON.stringify(value)});`).join('\n') + '\n');
-await copyFile(subjectXpi, join(profile, 'extensions', `${subjectID}.xpi`));
+if (!tree.reuseExisting) {
+  await writeFile(join(profile, 'user.js'), Object.entries(prefs).map(([key, value]) => `user_pref(${JSON.stringify(key)}, ${JSON.stringify(value)});`).join('\n') + '\n');
+  await copyFile(subjectXpi, join(profile, 'extensions', `${subjectID}.xpi`));
+}
 const upgradeInProfile = twoVersion ? join(profile, 'zchatgpt-upgrade.xpi') : undefined;
 const rollbackInProfile = twoVersion ? join(profile, 'zchatgpt-rollback.xpi') : undefined;
 if (twoVersion) {

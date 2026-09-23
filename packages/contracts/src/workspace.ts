@@ -1,4 +1,4 @@
-import type { DocumentContext, Draft, ImageAttachment, PaperIdentity, PaperScope } from './index.ts';
+import type { DocumentContext, DocumentRevision, Draft, ImageAttachment, PaperIdentity, PaperScope, Rect } from './index.ts';
 
 export type WorkflowKind = 'read' | 'annotate' | 'acquire' | 'organize' | 'diagram';
 export interface Personalization {
@@ -181,5 +181,15 @@ export interface LibraryReferencePort {
    */
   pickFile?(): Promise<PickedFile>;
   capturePage?(paper: PaperScope, pageIndex: number): Promise<ImageAttachment | null>;
+  /** A single-page PDF region explicitly selected by the user in the matching Reader. */
+  captureRegion?(selection: FigureRegionSelection, signal?: AbortSignal): Promise<ImageAttachment>;
   exportImage?(image: ImageAttachment): Promise<void>;
+}
+
+/** Frozen geometry for one user-selected PDF figure/region; coordinates are native PDF points. */
+export interface FigureRegionSelection {
+  paper: PaperScope;
+  revision: DocumentRevision;
+  pageIndex: number;
+  rect: Rect;
 }

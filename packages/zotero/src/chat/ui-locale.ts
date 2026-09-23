@@ -185,6 +185,8 @@ const COPY: Readonly<Record<string, string>> = {
   'Local data': '本地数据',
   Details: '详情',
   'Agent instructions': 'Agent 指令',
+  'Instructions for Agent': 'Agent 指令',
+  'Model availability': '模型可用性',
   Models: '模型',
   'Checked models are offered in Agent requests; the exact id is what is sent. Source: the bundled catalog, not your account\'s live entitlements.': '勾选的模型会在 Agent 请求中提供；右侧确切 id 就是实际发送的 id。来源：随包目录，并非你账户的实时权限。',
   'Checked models are offered in Agent requests; the exact id is what is sent. Source: the running runtime\'s report plus the bundled catalog.': '勾选的模型会在 Agent 请求中提供；右侧确切 id 就是实际发送的 id。来源：正在运行的运行时的报告与随包目录。',

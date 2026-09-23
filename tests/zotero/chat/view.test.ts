@@ -43,6 +43,7 @@ async function mountReadyChat(options: {
   draftCitations?: typeof citationA[];
   draftImages?: typeof imageA[];
   conversations?: Conversation[];
+  noCurrent?: boolean;
   runtimeModels?: ModelOption[];
   textScale?: { value: number };
   readerZoom?: { factor: number; ins: number; outs: number; resets: number };
@@ -53,6 +54,7 @@ async function mountReadyChat(options: {
   openCitation?: (citation: Citation) => Promise<void>;
   copyText?: (text: string) => void;
   openLink?: (url: string) => void;
+  explainFigure?: (question: string) => Promise<void>;
   usage?: Conversation['usage'];
   requestTiming?: Conversation['requestTiming'];
   activeRequestId?: string | null;
@@ -91,7 +93,7 @@ async function mountReadyChat(options: {
     snapshot: () => structuredClone(runtime), observe: l => { onRuntime = l; l(structuredClone(runtime)); return () => undefined; },
     refreshAccount: async () => {}, startLogin: () => Promise.reject(new Error()), cancelLogin: async () => {},
     current: () => Promise.resolve(structuredClone(conversation)),
-    peekCurrent: () => Promise.resolve(structuredClone(conversation)),
+    peekCurrent: () => Promise.resolve(options.noCurrent ? null : structuredClone(conversation)),
     newConversation: () => {
       conversation = {
         ...conversation, id: 'aaaaaaaa-0000-4000-8000-000000000002', messages: [], lastSeq: 0,
@@ -186,6 +188,7 @@ async function mountReadyChat(options: {
     ...(options.copyText ? { copyText: options.copyText } : {}),
     ...(options.openDocumentPage ? { openDocumentPage: options.openDocumentPage } : {}),
     ...(options.openLink ? { openLink: options.openLink } : {}),
+    ...(options.explainFigure ? { explainFigure: options.explainFigure } : {}),
     ...(options.readerZoom ? {
       readerZoom: {
         zoomIn: () => { options.readerZoom!.ins += 1; options.readerZoom!.factor = Math.round((options.readerZoom!.factor + 0.25) * 100) / 100; },
@@ -2691,6 +2694,23 @@ it('keeps the picker open while effort, speed and model are configured in one vi
   expect(menu.hidden).toBe(true);
 });
 
+it('enables live Sol selection when a new Agent draft has no stored settings yet', async () => {
+  const { root, presenter, updateRuntime } = await mountReadyChat({ messages: [], noCurrent: true, runtimeModels: [] });
+  presenter.setMode('agent');
+  updateRuntime({ revision: 1, models: [model], account: { state: 'signedIn' } });
+  const picker = root.querySelector<HTMLButtonElement>('[data-zchatgpt-picker]')!;
+  await vi.waitFor(() => expect(picker.dataset.summary).toContain('Sol'));
+  expect(picker.disabled).toBe(false);
+  picker.click();
+  const option = await vi.waitFor(() => {
+    const row = root.querySelector<HTMLButtonElement>('[data-zchatgpt-setting="model"][data-zchatgpt-value="gpt-6-sol"]');
+    expect(row).not.toBeNull(); return row!;
+  });
+  expect(option.disabled).toBe(false);
+  option.click();
+  expect(presenter.snapshot().draft.settings?.model).toBe('gpt-6-sol');
+});
+
 it('closes the model popover on Escape and click outside', async () => {
   const { root } = await mountReadyChat({ messages: [] });
   const picker = root.querySelector<HTMLButtonElement>('[data-zchatgpt-picker]')!;
@@ -2728,7 +2748,7 @@ it('groups the plus popover into titled sections with title and description rows
   const { root } = await mountReadyChat({ messages: [] });
   const menu = root.querySelector<HTMLElement>('[data-zchatgpt-plus-menu]')!;
   root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="composer-plus"]')!.click();
-  const groups = [...menu.querySelectorAll<HTMLElement>('.zchatgpt-plus-group')];
+  const groups = [...menu.querySelectorAll<HTMLElement>('.zchatgpt-plus-group')].filter(group => !group.hidden);
   expect(groups).toHaveLength(3);
   expect(groups[0]!.querySelector('.zchatgpt-plus-heading')?.textContent).toBe('Attach');
   expect(groups[1]!.querySelector('.zchatgpt-plus-heading')?.textContent).toBe('Reference');
@@ -2750,6 +2770,16 @@ it('groups the plus popover into titled sections with title and description rows
   expect(menu.querySelector('[data-zchatgpt-action="capture-page"]')).toBeNull();
   expect(menu.querySelector('[data-zchatgpt-action="capture-region"]')).toBeNull();
   expect(menu.textContent).not.toMatch(/Capture page|Capture selected region/u);
+});
+
+it('sends the explicit Figure command to the Reader Agent hook', async () => {
+  const explainFigure = vi.fn(() => Promise.resolve());
+  const { root } = await mountReadyChat({ messages: [], explainFigure });
+  root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="composer-plus"]')!.click();
+  const command = root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="explain-figure"]')!;
+  expect(command.closest<HTMLElement>('.zchatgpt-plus-group')?.hidden).toBe(false);
+  command.click();
+  await vi.waitFor(() => expect(explainFigure).toHaveBeenCalledWith('Explain the selected Figure and mark the key visual components.'));
 });
 
 it('separates the reference and skill rows into their own titled groups', async () => {
@@ -2900,12 +2930,16 @@ it('opens the paper context details from the More menu and returns focus on Esca
   expect(root.ownerDocument.activeElement).toBe(more);
 });
 
-it('shows a compact Agent empty state whose entries only prepare a draft', async () => {
+it('shows a compact paper-specific Agent empty state whose highlight entry prepares a draft', async () => {
   const sent: SendInput[] = [];
   const { root, presenter } = await mountReadyChat({ messages: [], sent });
   presenter.setMode('agent');
   await vi.waitFor(() => expect(root.querySelector<HTMLElement>('[data-zchatgpt-agent-empty]')?.hidden).toBe(false));
   const empty = root.querySelector<HTMLElement>('[data-zchatgpt-agent-empty]')!;
+  expect(empty.textContent).toContain('Explain this paper');
+  expect(empty.textContent).toContain('Explain a Figure');
+  expect(empty.textContent).not.toContain('Get an article');
+  expect(empty.textContent).not.toContain('Organize selected items');
   // Compact copy, not a hero: no oversized heading element, no logo.
   expect(empty.querySelectorAll('h1, h2')).toHaveLength(0);
   const highlight = empty.querySelector<HTMLButtonElement>('[data-zchatgpt-action="empty-highlight"]')!;
@@ -2917,6 +2951,16 @@ it('shows a compact Agent empty state whose entries only prepare a draft', async
   await vi.waitFor(() => expect(root.querySelector<HTMLTextAreaElement>('[data-zchatgpt-input]')!.value).toMatch(/Highlight/u));
   // Once the draft exists the empty state steps out of the way.
   await vi.waitFor(() => expect(empty.hidden).toBe(true));
+});
+
+it('starts Figure region selection from the paper-specific Agent empty state', async () => {
+  const explainFigure = vi.fn(() => Promise.resolve());
+  const { root, presenter } = await mountReadyChat({ messages: [], explainFigure });
+  presenter.setMode('agent');
+  const empty = root.querySelector<HTMLElement>('[data-zchatgpt-agent-empty]')!;
+  await vi.waitFor(() => expect(empty.hidden).toBe(false));
+  empty.querySelector<HTMLButtonElement>('[data-zchatgpt-action="empty-figure"]')!.click();
+  await vi.waitFor(() => expect(explainFigure).toHaveBeenCalledWith('Explain the selected Figure and mark its key visual components.'));
 });
 
 it('derives a provable history source and never promotes a legacy chat', () => {

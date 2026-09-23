@@ -220,24 +220,9 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
     automaticPdfLabel.append(automaticPdfText);
     general.append(automaticPdfLabel);
 
-    // Chat is an explanation, not a second settings surface: the official website owns its account,
-    // models and conversations, so there is nothing here that could control them.
-    const chatSection = fieldset(doc, container, 'Chat');
-    const chatNote = element(doc, 'p', 'Chat opens the official ChatGPT website in the sidebar. Its account, models, conversations and limits are managed by ChatGPT, not by this plugin.');
-    chatNote.className = 'zchatgpt-preferences-muted';
-    chatNote.dataset.zchatgptPref = 'chat-note';
-    const chatWebNote = element(doc, 'p', 'The plugin adds only the paper context it may attach to a message you send there. It never sends a Codex request for Chat.');
-    chatWebNote.className = 'zchatgpt-preferences-muted';
-    chatWebNote.dataset.zchatgptPref = 'chat-note-web';
-    chatSection.append(chatNote, chatWebNote);
-
-    // Agent groups everything that belongs to Codex: its connection, the model allowlist, the
-    // instructions box and the installed skills. Opening this pane never starts Codex.
+    // Chat's account and model controls live on the official website, so this pane only renders
+    // actual plugin settings. Agent groups its model allowlist, instructions and installed skills.
     const agentSection = fieldset(doc, container, 'Agent');
-    const agentNote = element(doc, 'p', 'Codex starts only when you use Agent. Opening this window reads local settings and any cached model report; it never connects.');
-    agentNote.className = 'zchatgpt-preferences-muted';
-    agentNote.dataset.zchatgptPref = 'agent-note';
-    agentSection.append(agentNote);
 
     const modelsHeading = element(doc, 'div', 'Models');
     modelsHeading.className = 'zchatgpt-preferences-subhead';
@@ -248,21 +233,15 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
     note.className = 'zchatgpt-preferences-muted';
     note.dataset.zchatgptPref = 'models-note';
     modelsNote = note;
+    const modelDetails = element(doc, 'details');
+    modelDetails.append(element(doc, 'summary', 'Model availability'), note);
     const models = element(doc, 'div');
     models.dataset.zchatgptPref = 'models';
-    agentSection.append(modelsHeading, note, models);
+    agentSection.append(modelsHeading, modelDetails, models);
 
-    // The single instructions box is Agent-scoped: it persists in `background` and reaches every
-    // Agent request in the frozen `workflow.preferences` snapshot. Chat and the official web page
-    // never see it. The sub-heading, the scope note and the Save row are appended in reading order
-    // around the field, so the box never ends up above its own heading.
-    const instructionsHeading = element(doc, 'div', 'Agent instructions');
-    instructionsHeading.className = 'zchatgpt-preferences-subhead';
-    const instructionNote = element(doc, 'p', 'Applies only to Agent requests.');
-    instructionNote.className = 'zchatgpt-preferences-muted';
-    instructionNote.dataset.zchatgptPref = 'instructions-note';
-    agentSection.append(instructionsHeading, instructionNote);
-    const instructionsLabel = labelled(doc, agentSection, 'Instructions', `preference-${INSTRUCTIONS_FIELD}`, 'textarea');
+    // The single Agent-scoped box persists in `background` and reaches Agent requests in their
+    // frozen preferences. The official ChatGPT page never sees it.
+    const instructionsLabel = labelled(doc, agentSection, 'Instructions for Agent', `preference-${INSTRUCTIONS_FIELD}`, 'textarea');
     const instructions = instructionsLabel.querySelector('textarea') as HTMLTextAreaElement;
     instructions.rows = 4;
     instructions.maxLength = INSTRUCTIONS_MAX;

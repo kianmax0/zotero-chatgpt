@@ -29,7 +29,7 @@ async function runHostSmoke(config) {
   };
   try {
     await Zotero.initializationPromise;
-    const profile = String(config.profile); const match = profile.match(/^(.*\/\.zotero-chatgpt-dev\/context)\/profile$/u);
+    const profile = String(config.profile); const match = profile.match(/^(.*\/\.zotero-chatgpt-dev\/(?:context|context-runs\/[a-z0-9][a-z0-9-]{0,63}))\/profile$/u);
     await check('dedicated-preserved-context-profile', PathUtils.profileDir === profile && Boolean(match) && config.dataDir === `${match?.[1]}/data` && Zotero.DataDirectory.dir === config.dataDir);
     const win = await until(() => Zotero.getMainWindow(), 'main-window'); await until(() => win.ZoteroPane?.loaded && win.ZoteroPane?.itemsView, 'library-ready');
     const { AddonManager } = ChromeUtils.importESModule('resource://gre/modules/AddonManager.sys.mjs'); const addon = await AddonManager.getAddonByID(config.subjectID);
@@ -58,9 +58,11 @@ async function runHostSmoke(config) {
     // Live acceptance must use the workhorse/efficient models, never the most costly Astra fallback.
     const picker = panel().querySelector('[data-zchatgpt-picker]');
     click(picker);
-    const lowCostModel = await until(() => panel()?.querySelector('[data-zchatgpt-setting="model"][data-zchatgpt-value="gpt-6-sol"]')
-      || panel()?.querySelector('[data-zchatgpt-setting="model"][data-zchatgpt-value="gpt-6-luna"]'), 'sol-or-luna-model-option', 10000).catch(() => null);
-    if (!lowCostModel || lowCostModel.disabled) {
+    const modelRow = id => panel()?.querySelector(`[data-zchatgpt-setting="model"][data-zchatgpt-value="${id}"]`);
+    const lowCostModel = await until(() => [modelRow('gpt-6-sol'), modelRow('gpt-6-luna')].find(row => row && !row.disabled) ?? null, 'enabled-sol-or-luna-model-option', 10000).catch(() => null);
+    report.offeredModelRows = [...(panel()?.querySelectorAll('[data-zchatgpt-setting="model"]') ?? [])].map(row => ({ id: row.dataset.zchatgptValue ?? '', disabled: row.disabled === true })).filter(row => row.id);
+    await save();
+    if (!lowCostModel) {
       report.status = 'blocked'; report.blockedStage = 'sol-or-luna-model-unavailable'; report.finishedAt = new Date().toISOString(); await save(); return;
     }
     click(lowCostModel);
