@@ -1,119 +1,13 @@
-# README media: what each file is
+# README demo media
 
-Short provenance for the images in the repository README. This is a record of what was actually
-produced, not a product specification.
+Five GIFs show Silver et al. (2016), *Mastering the game of Go with deep neural networks and tree search*, DOI `10.1038/nature16961`, in a dedicated Zotero 9.0.6 library. The user-provided 20-page PDF has SHA-256 `8ccb04c7e6b9bd62d2b5a727617fb23a936c28e80bf96a2e511a29bd4a108c72`; the PDF is not committed. The local development XPI used for the captures has SHA-256 `e3216ba5d519ab93986b0d935fbb0158a70b1c213e842c504a2127d9a5f2a7d8`, distinct from the older public v0.1.1 asset.
 
-## Where the earlier Chat media was made
+The host was `.zotero-chatgpt-dev/context-runs/readme-media/{profile,data}` on macOS Apple Silicon. No everyday Zotero library or authentication files were read or captured. To leave the user's mouse and foreground window alone, a temporary test-only helper drove this isolated process. The Chat frames combine Zotero's actual window rendering with a snapshot of its embedded official page at the on-screen position; the other frames are window captures. Frames were scaled, quantized and joined with hard cuts. No quotes, answers, annotations or UI controls were drawn into them. The GIFs are **edited state sequences**, not continuous recordings or evidence of elapsed time.
 
-- **Host**: Zotero 9.0.6 (`/Applications/Zotero.app`, version from its `Info.plist`), macOS, Apple
-  Silicon, light theme.
-- **Instance**: an isolated, dedicated profile and data directory,
-  `.zotero-chatgpt-dev/context-runs/readme-media/{profile,data}`, launched with
-  `-no-remote -profile ... -datadir ...`. The everyday Zotero profile was never opened, used, or
-  captured.
-- **Build under capture**: `dist/zotero-chatgpt-0.4.0a34-dev.xpi`, sha256
-  `5c9ed57cb3e7269a9e64e604236cf5823afd3defbfe58f437b3fc96e653e55fa`, matching
-  `packages/zotero/manifest.json` version `0.4.0a34`. This is the artifact that was installed in the
-  isolated profile for these captures.
-- **Model requests**: none. No Chat question was sent and no Agent request was made. The captures use
-  only local UI state and a passage staged into the official composer before sending.
+- **`silver-chat-answer.gif`**: a real passage on printed p. 484 was selected through the product's selection handler; **More details** submitted it to the signed-in official ChatGPT page. The page accepted the message and displayed a relevant answer. The selection and response frames are separated by a cut.
+- **`silver-agent-answer.gif`**: a signed-in GPT-6 Sol turn asked how policy and value networks complement tree search. The Reader displayed a completed answer with a page link after 128 seconds; the wait is omitted.
+- **`silver-agent-highlights.gif`**: a separate GPT-6 Sol turn completed with 3/3 native highlights on printed pp. 484–485. The task card and visible Zotero highlights are from the same request.
+- **`silver-highlight-navigation.gif`**: task output controls opened those saved highlights on pp. 484 and 485; the jump is represented by a hard cut.
+- **`silver-figure-callout.gif`**: Figure 1 on printed p. 485 was selected in the real PDF.js page. One Sol turn produced five review candidates. The host exited after that turn completed but before persisting its task; the same request was reconciled with the repository's `runFigureAgent` and task controller while the host was stopped, without another model turn. Two candidates were approved through the product UI. The task reports 2/5 saved, and Zotero native readback found two image regions and two ink annotations. The GIF cuts from selection to review to saved output.
 
-## Demo content
-
-The paper in the images is synthetic and generated for this repository by
-`.zotero-chatgpt-dev/readme-media/make-demo-paper.mjs` ("Learning from prediction errors", "Demo
-Author / Demo Institute"). It carries no DOI, no real author, no real publication and no real data,
-and it says so on its own first page. Its bibliography fields were imported from a synthetic BibTeX
-entry, and the PDF was attached by hand in the isolated library.
-
-## The files
-
-### `overview.png`
-
-- **Type**: real screenshot of the running product, not an illustration.
-- **Content**: the isolated Zotero window at 1440x880 CSS px (captured at 2x), with the synthetic
-  demo paper in the reader on the left and the plugin sidebar on the right at 480 CSS px. The sidebar
-  is in Chat mode and hosts the real `chatgpt.com` page in its signed-out state; the sidebar's own
-  chrome (the Chat/Agent switch, the paper tab, the two copy controls, and the first-run context
-  disclosure) is the product's.
-- **Processing**: captured with `screencapture -l <window id>`, cropped to the window, scaled once to
-  1920 px wide. No content was retouched, added, or removed.
-- **What it does not show**: any conversation, answer, or signed-in state. No question was asked.
-
-### `chat-demo.gif`
-
-- **Type**: real screen recording of the running product.
-- **Content**: one continuous interaction in the isolated window. A sentence is selected in the PDF
-  with a real drag, the plugin's own `Ask in sidechat` control is clicked, and the passage arrives in
-  the official ChatGPT composer as a draft. The recording ends before anything is sent.
-- **Why this is not a sent request**: in Chat mode the selection action routes `ask` to
-  `official.stage()` in `packages/zotero/src/chat/official-chat.ts`, which writes the composer and
-  never submits. The submitting control (`More details`) was deliberately never clicked.
-- **Processing**: recorded with `ffmpeg` from `avfoundation` at 15 fps / 3024x1964, trimmed to 8.1 s
-  (leading and trailing idle time only; the middle is continuous and is not sped up), scaled to
-  1200 px wide, 12 fps, 224-colour palette, no dither, delta-optimised.
-- **Note on the caption**: the still and the GIF both say the passage is shown before sending,
-  because that is the state the recording ends in.
-
-### `chat-demo-poster.png`
-
-- **Type**: still frame from the same recording (not a separate capture).
-- **Content**: the final state of `chat-demo.gif`, exported at 1600 px wide from the source video so
-  the text stays sharp. Provided so the section is readable without playing the animation.
-
-## Library Agent acquisition stills from the earlier candidate (2026-09-23)
-
-- **Host and scope:** Zotero 9.0.6 on macOS Apple Silicon, in the dedicated
-  `.zotero-chatgpt-dev/context-runs/demo-final-20260923/{profile,data}` tree. The collection
-  named `Synthetic Agent demo` exists only there. No daily Zotero profile was opened or captured.
-- **Build:** `dist/zotero-chatgpt-0.1.1-dev.xpi`, SHA-256
-  `e0baff9f551ba7a195edb2b9a37c7ab6acdc2b85d169aa5664c4986496867726`, installed in
-  that profile for these final captures. Codex 0.156.1 is bundled, but no model turn was used for
-  the acquisition workflow shown here.
-- **`agent-library-entry.png`:** real Zotero main-library window with the Agent toolbar button
-  visible before a PDF or article was opened in the isolated collection.
-- **`agent-acquisition-review.png`:** a real unsaved task preview for public DOI
-  `10.1371/journal.pone.0345574`. The Zotero translator supplied the metadata; the task had not
-  received approval when captured.
-- **`agent-acquisition-result.png`:** the same task after explicit approval. The original Zotero
-  item and verified PDF attachment appeared in the isolated collection, and the task readback shows
-  one item saved and one PDF attached. The output button also selected the native Zotero item,
-  whose detail pane showed the DOI, target collection, and one attachment. Separately, DOI
-  `10.1038/nature14539` saved metadata in an earlier isolated test profile but reported no OA PDF
-  candidate; it is not shown as a successful PDF download.
-- **Capture:** unretouched window screenshots through the computer-use API at 1000×600 CSS px.
-  These are separate stills from the same product run, not a continuous screen recording. They do
-  not demonstrate a model-generated highlight or a general claim that every DOI has an OA PDF.
-
-## `agent-classic-paper-demo.gif` (2026-09-23)
-
-- **Type:** trimmed screen recording of a real Codex Agent turn and Zotero's resulting native highlight. No frames or annotations were drawn in editing.
-- **Paper:** Vaswani et al., *Attention Is All You Need*, [arXiv:1706.03762](https://arxiv.org/abs/1706.03762), imported with its public PDF into the dedicated `Transformer demo` test collection. Source PDF SHA-256: `bdfaa68d8984f0dc02beaca527b76f207d99b666d31d1da728ee0728182df697`.
-- **Host:** Zotero 9.0.6, macOS Apple Silicon, dedicated `.zotero-chatgpt-dev/context-runs/library-agent-visual-20260923-1625/{profile,data}`. The user completed official Codex sign-in in this dedicated profile. No everyday library was used or captured.
-- **Build:** `dist/zotero-chatgpt-0.1.1-dev.xpi`, SHA-256 `af5d6bd72ed1aedff6beaa7c705dfc3f29ed5723575f37e76440e801755347f3` at capture time. Later source changes are identified by a different SHA; this clip is not evidence for those changes.
-- **Actual work:** one `gpt-6-sol` turn (request `c77878ac-1fee-4d6e-b968-4d0146771c17`) completed and its durable task recorded `autoApply: true`, `completed`, and 3/3 items `applied`. The visible yellow passage and task card show the real Reader result. The model took about 126 seconds; the clip shows the end of that wait and automatic native application, with no second approval click.
-- **Processing:** `ffmpeg` captured the public-paper Reader window at 10 fps. The GIF uses a contiguous 12-second tail, sampled to 6 fps and resized to 1000 px. The source recording is retained in ignored `.zotero-chatgpt-dev/demo-attention/raw-highlight.mp4`; GIF SHA-256 `c01eabca01ba60f8d7972dfc38627740a49c0df4d4e2a4d3b06292973e08a9de`.
-- **Limit:** the GIF shows one highlighted passage and a 3/3 task count. The durable task and native readback establish the three applied annotations; the GIF alone does not show every annotation or prove their scientific importance.
-
-## Rebuilding
-
-The working scripts and the raw captures are intentionally outside version control, under
-`.zotero-chatgpt-dev/readme-media/`:
-
-```sh
-node .zotero-chatgpt-dev/readme-media/make-demo-paper.mjs      # regenerate the demo paper
-.zotero-chatgpt-dev/readme-media/host.sh start                 # launch the isolated instance
-.zotero-chatgpt-dev/readme-media/reset-and-record.sh rec/chat-demo.mp4
-```
-
-`host.sh` only ever starts or stops the process whose arguments name this exact tree. The
-`runjs.sh`, `zjs.sh`, `domclick.sh`, `field.mjs`, `winlist`, `ocr`, and `mouse` helpers were written
-for these captures; they drive the isolated instance only and are not part of the product.
-
-## Rights
-
-All screenshots were captured here, and the drawn illustration and synthetic demo paper were made
-for this repository. The newer Agent stills show the Zotero interface and public DOI bibliographic
-metadata inside an isolated test library; this repository does not claim ownership of those third
-party elements. No user library content or third-party supplied screenshot is included. Nothing was
-uploaded to an external image host or compression service.
+Library organization did not produce a valid task or change the item, and topic discovery/download was not run. No GIF claims either flow. Older signed-out, synthetic-paper and unrelated-paper README media were removed from `docs/media/`.

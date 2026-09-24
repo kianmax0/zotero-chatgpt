@@ -1,9 +1,23 @@
 # zotero-chatgpt：进度与证据索引
 
-> 文档类型：证据和缺口，不是产品规格。更新日期：2026-09-23。
+> 文档类型：证据和缺口，不是产品规格。更新日期：2026-09-24。
 > 前四节记录 2026-09-23 的本地开发候选，后续保留有引用价值的发行、失败与验收历史；历史结果不自动继承到当前候选。已移除过期的“当前候选”快照和重复状态矩阵。状态只用 PASS / FAIL / BLOCKED / NOT RUN。
 
 产品要求见 [zotero-chatgpt-user-flow.md](zotero-chatgpt-user-flow.md)，架构见 [module-design.md](module-design.md)，命令与状态定义见 [development.md](development.md)。
+
+## 2026-09-24 README 与 Silver 论文演示
+
+本轮只改 README、媒体与证据文档。使用用户提供的 Silver 等人 2016 年论文和隔离 `.zotero-chatgpt-dev/context-runs/readme-media/`；未操作日常文献库。五段 GIF 的来源、剪辑和产物 SHA 见 [media/sources.md](media/sources.md)。当前开发 XPI SHA-256 为 `e3216ba5d519ab93986b0d935fbb0158a70b1c213e842c504a2127d9a5f2a7d8`。
+
+| 场景 | 状态 | 实测与边界 |
+| --- | --- | --- |
+| Chat 选区问答 | PASS | 登录后的官方 ChatGPT 页面接受 **More details** 送出的 Silver 论文选区与书目信息，并显示真实回答；[GIF](media/silver-chat-answer.gif) 为状态剪辑。 |
+| Agent 论文问答 | PASS | 一次 GPT-6 Sol 请求完成，Reader 显示带页码链接的回答；[GIF](media/silver-agent-answer.gif) 略去 128 秒等待。 |
+| Agent 原生高亮与定位 | PASS | 另一次 Sol 请求完成，任务 3/3 applied；Zotero 读回三条原生高亮，任务输出定位到第 484、485 页；[高亮](media/silver-agent-highlights.gif)、[定位](media/silver-highlight-navigation.gif)均为同任务的状态剪辑。 |
+| Figure 1 圈画 | PASS | 一次 Sol 轮次生成五个候选；宿主退出后先在记录副本、再在停机的专用 profile 内以原请求身份对账并生成 review 任务，未重发模型轮次。产品界面批准两项后任务 2/5 saved；原生读回 2 个 image 区域与 2 个 ink 标注。[GIF](media/silver-figure-callout.gif)展示选区、审核和保存结果。 |
+| 文库整理 | FAIL | 首次 Sol 轮次被历史标为 interrupted；确认结束后重试，第二轮模型输出已完成，但任务输入校验失败。Silver 条目没有新增标签，也没有可交付成功 GIF。 |
+| 按主题发现并下载论文 | NOT RUN | 尚未执行真实发现、审核与 OA PDF 下载，README 未放此功能的演示 GIF。 |
+| 完整宿主门禁与新 XPI 打包 | NOT RUN | 本轮是文档和实机演示，未重跑完整门禁或重新打包；上述 PASS 只绑定已安装的指定开发 XPI 与单项真实流程。 |
 
 ## 2026-09-23 仓库清理候选
 
@@ -28,7 +42,7 @@
 | 真实 Zotero 无模型宿主 | NOT RUN | 最近的 `.zotero-chatgpt-dev/context-runs/library-agent-compact-final-20260923-2010/host-report.json` 是较早 XPI `ba3b3105…` 的 **55/55 PASS**，包含主窗口默认 Chat、原生详情栏保留、分隔条、Reader 进入自动收起和 Chat/Agent 隔离；当前 XPI 只补写入意图拒绝，尚未重跑宿主。 |
 | 视觉检查 | NOT RUN | 较早 XPI `b3c088a3…` 的 Zotero 1000×600 窄窗截图 `.zotero-chatgpt-dev/context-runs/library-visual-review-20260923-1934/main-chat-default.png` 与 `.zotero-chatgpt-dev/context-runs/library-agent-visual-20260923-1940/main-agent.png` 显示主窗口无文字重叠、原生详情栏可见；后续四按钮精简产物的有效截图未取得，不能继承该视觉 PASS。深色主题和较大字号也未测。 |
 | 当前 XPI 的 Sol 原生高亮与整理 | BLOCKED | 较早 XPI `ba3b3105…` 的 `.zotero-chatgpt-dev/context-runs/library-agent-visual-20260923-1625/host-live-final-ba3-sol-core-20260923.json` 在 `official-agent-login` 处停止，**0 次新模型轮次**；需用户在专用 profile 本人重新登录，当前 XPI 尚无新模型请求。更早 XPI `af5d6bd7…` 的真实 Sol 报告 `host-live-sol-live-after-picker-20260923.json` 已完成可靠高亮自动写入/读回/撤销与选中项整理批准/读回/冲突撤销，旧结果不继承为当前产物 PASS。 |
-| 经典论文 GIF | PASS | [真实录屏](media/agent-classic-paper-demo.gif) 使用公开论文 *Attention Is All You Need*、同一专用 profile 和较早 XPI `af5d6bd7…`。一个 `gpt-6-sol` 轮次完成，任务账本记载 3/3 原生高亮自动写入；GIF 显示其中一条和任务卡。来源、剪辑与局限见 [media/sources.md](media/sources.md)。 |
+| 经典论文历史演示 | PASS | 较早 XPI `af5d6bd7…` 在专用 profile 对 *Attention Is All You Need* 完成一次 Sol 任务及 3/3 原生高亮；旧 GIF 已按 README 素材清理要求从当前仓库移除，历史验证不继承到当前 XPI。 |
 | Figure 与主窗口 Chat 完整真实链路 | NOT RUN | Figure 合成候选的 Zotero 原生写入/读回/精确撤销在较早候选 `.zotero-chatgpt-dev/context-runs/library-agent-native-final-20260923-1720/host-report.json` **20/20**；当前 XPI 上从真实 Sol 裁图到用户批准和原生结果尚未跑完。主窗口 Chat 的官方网页真实提交与自动上下文接收也尚未验证，不能把 mock 或 UI 状态当作远端回答。 |
 
 失败及旧产物报告保留在各自 run-id 目录；上表不覆盖以下历史记录。当前分支仅开发候选，尚未公开 Release 或安装到日常 profile。

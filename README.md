@@ -1,57 +1,69 @@
-# zotero-chatgpt
+# Zotero ChatGPT
 
-**Read papers. Stay in Zotero.**
+[简体中文](README.zh-CN.md) · [Download v0.1.1](https://github.com/kianmax0/zotero-chatgpt/releases/tag/v0.1.1)
 
-ChatGPT for your papers. An Agent for your library.
+**Read papers with ChatGPT. Put a Codex Agent to work in Zotero.**
 
-![A demo paper open beside the zotero-chatgpt sidebar in Zotero.](docs/media/overview.png)
+Chat opens the official ChatGPT website beside your PDF. Agent is a separate mode for verified Zotero highlights and scoped library tasks. You choose when to switch; Chat never starts a Codex model request.
 
-## Ask your paper
+> The demos below use the current `main` development build. The downloadable v0.1.1 release is older and does not include every feature shown here.
 
-Explain a passage, unpack a derivation, or ask a follow-up—right beside your PDF. Chat uses the official ChatGPT website. It includes the current paper's title, authors, publication, DOI, and stored abstract by default; a passage you select is added separately. Turn automatic paper details off in the plugin settings.
+## What it does
 
-> “What is the key idea behind this method?”
+| Mode | Use it for |
+| --- | --- |
+| **Chat** | Ask about the current paper in the official ChatGPT page. The plugin prepares its bibliography and saved abstract; you can add a selected passage or paste the PDF yourself. |
+| **Agent** | Ask Codex to explain the paper, create verified native highlights, or propose a Figure callout. In the library window, discover papers by topic, acquire an available open-access PDF, and organize selected items. |
 
-![Selecting a passage and preparing a question in the Chat sidebar, without sending.](docs/media/chat-demo.gif)
+Agent changes stay within the requested paper or collection. Verified highlights from an explicit request apply automatically; other changes show a preview for approval and report the Zotero result. Figure and model-backed library flows on `main` remain experimental; [current verification](docs/progress.md) is tracked separately. Agent model turns use your Codex allowance and require a separate sign-in. Chat needs no API key and does not use Codex allowance.
 
-*Bring a passage into your question. Shown before sending.* [View still image](docs/media/chat-demo-poster.png)
+## Demo: reading Silver et al. (2016)
 
-## Put Agent to work
+These demos use *[Mastering the game of Go with deep neural networks and tree search](https://doi.org/10.1038/nature16961)* in an isolated Zotero library. Each GIF is an edited sequence of real window screenshots; the cuts are not continuous screen recording.
 
-Highlight key passages and explain a Figure with native callouts. In Zotero's main library window, open **Zotero Agent** to ask for papers on a topic, organize selected or `@` mentioned articles, fill blank DOI-backed metadata, create a short abstract-based note, or create a collection. The workbench has a conversation, `/` skills, `@` Zotero references, and a review card for each write. You can switch the same main-window panel to official ChatGPT for one selected article.
+**Ask about a passage.** Select text in the PDF, choose **More details**, and get an answer in the official ChatGPT page.
 
-Agent highlights apply automatically only after the quoted passages are verified against the PDF. Figure callouts and library writes require review, with native readback and conflict-aware undo. Topic search uses OpenAlex for discovery; a paper is only reported as downloaded when Zotero verifies its OA PDF attachment.
+![A Silver paper passage sent through More details and answered in the official ChatGPT page.](docs/media/silver-chat-answer.gif)
 
-> “Highlight the five most important passages and explain why.”
+**Ask Agent about the paper.** A separate Codex conversation answers with a page reference.
 
-In a dedicated Zotero test library, GPT-6 Sol highlighted three verified passages in *Attention Is All You Need* and Zotero saved all three native annotations automatically.
+![A Codex Agent question about policy and value networks, followed by its cited answer.](docs/media/silver-agent-answer.gif)
 
-![Real GPT-6 Sol Agent request automatically highlighting Attention Is All You Need in Zotero.](docs/media/agent-classic-paper-demo.gif)
+**Highlight key passages.** Agent verified the policy network, value network, and Monte Carlo tree search passages, then saved three native Zotero highlights.
 
-Figure callouts, collection creation, metadata fill, and notes have local and native test coverage; their complete model-to-approval flows still need separate live verification.
+![A completed Agent task reports three applied highlights, shows their source passages, and reveals yellow highlights in the Silver paper.](docs/media/silver-agent-highlights.gif)
 
-Agent is experimental; fetching open-access PDFs from a DOI or article link is still being refined.
+**Mark Figure 1.** Select the diagram, review proposed callouts, and approve two native Zotero area and ink annotations.
 
-## Get started
+![Selecting Figure 1, reviewing two callouts, and viewing the saved native Zotero annotations.](docs/media/silver-figure-callout.gif)
 
-Install the `.xpi` in Zotero. Open a PDF and its sidebar for Chat, highlights or Figure explanations. Use **Zotero Agent** in the main library window for topic discovery and library work; no PDF needs to be open. Sign in to Codex when you use a model-backed Agent task.
+**Jump to the result.** The task's output controls open the saved highlights in the PDF, including the value-network passage on page 485.
 
-**Chat needs no API key and uses no Codex quota.**
-Agent uses Codex quota and requires separate sign-in.
+![The Agent task and the corresponding native highlights on pages 484 and 485 of the Silver paper.](docs/media/silver-highlight-navigation.gif)
 
-The Agent model picker shows GPT-6 Sol, Astra, and Luna when the active Codex runtime reports them, with Sol preferred for new work.
+## Install
 
-On Linux x86_64, the Agent uses the installed Codex CLI. Set `CODEX_CLI_PATH` when it is not in
-`~/.local/bin/codex` or `PATH`; the existing `~/.codex/auth.json` login is copied into the plugin's
-private runtime account. Build this fork with Node 24, then install `build/zotero-chatgpt.xpi`:
+**Released build:** Download the `.xpi` from [v0.1.1](https://github.com/kianmax0/zotero-chatgpt/releases/tag/v0.1.1). In Zotero, open **Tools → Plugins** and drag it into that window. This preview requires Zotero 9.0.6. Agent uses the bundled runtime on macOS Apple Silicon; on Linux x86_64 it requires an installed Codex CLI. Restart Zotero if prompted.
+
+**Current development build (macOS Apple Silicon):** With Node 24 and npm 11, run:
 
 ```sh
-cd ~/src/zotero-chatgpt
+git clone https://github.com/kianmax0/zotero-chatgpt.git
+cd zotero-chatgpt
 npm ci
+node scripts/runtime-prepare.mjs
 npm run package:dev
 ```
 
-_Early preview · macOS (Apple Silicon) and Linux x86_64 · Zotero 9.0.6._
+Install `dist/zotero-chatgpt-0.1.1-dev.xpi` using the same Zotero menu. The development build has the same version label as the older release; use the build you intended.
+
+## Start using it
+
+1. Open a PDF and click the chat bubble in Zotero's reader. Chat opens by default; sign in to ChatGPT in its page.
+2. Ask about the paper, or select a passage and choose **Ask in sidechat** to prepare a question. The selected text is not sent until you submit it.
+3. Switch to **Agent** only when you want a Codex task. Sign in to Codex separately. Use the main-library panel for discovery, acquisition, and organizing selected items.
+
+Automatic paper context can be turned off in the plugin settings. Copying a PDF file prepares it for you to paste into ChatGPT; it does not silently upload the file. Open-access PDF availability depends on the source.
 
 ---
 
