@@ -1,9 +1,139 @@
 # zotero-chatgpt：进度与证据索引
 
-> 文档类型：证据和缺口，不是产品规格。更新日期：2026-09-24。
-> 前四节记录 2026-09-23 的本地开发候选，后续保留有引用价值的发行、失败与验收历史；历史结果不自动继承到当前候选。已移除过期的“当前候选”快照和重复状态矩阵。状态只用 PASS / FAIL / BLOCKED / NOT RUN。
+> 文档类型：证据和缺口，不是产品规格。更新日期：2026-09-27。
+> 首节记录本轮仓库收尾与最终开发包，其后保留 Chat 网页修复、用户 UI 反馈、重构验收及有引用价值的修复、测试、发行与失败历史；历史结果不自动继承到当前候选。已移除过期的“当前候选”快照和重复状态矩阵。状态只用 PASS / FAIL / BLOCKED / NOT RUN。
 
 产品要求见 [zotero-chatgpt-user-flow.md](zotero-chatgpt-user-flow.md)，架构见 [module-design.md](module-design.md)，命令与状态定义见 [development.md](development.md)。
+
+## 2026-09-27 仓库收尾与当前开发包
+
+本轮在 `9c9f3f0` 工作树上审查并纳入已有 UI、页面桥、偏好注册与宿主测试改动，修正文档和营销源文件归档；文库 Agent 输入时只更新草稿相关控件，不再逐字重建消息、模型选项和历史列表。回归先观察到旧实现会替换已有消息 DOM，再验证修复后消息节点保持原身份。独立审查又发现未知官网编辑器的未标注发送控件可能绕过上下文门禁；回归先 FAIL，再收紧为有草稿时拦截所有外部点击、提交与非 IME Enter。旧 schema、任务账本和 Chat/Agent 执行边界没有为清理而删除。营销成片、截图、图片、Word 导出和视频制作浏览器 profile 只保留在本地；仓库只收制作源文件。已过时的 65 秒提示、清单和 manifest 移至本地忽略目录，未进入 Git。
+
+| 层级或场景 | 状态 | 本轮证据与限制 |
+| --- | --- | --- |
+| 静态与单测 | PASS | 最终 `npm run typecheck`、`npm run lint`；打包后 `npm run test:unit -- --maxWorkers=1` 为 114 files / 1521 tests。文库输入回归先 FAIL，修复后定向 19 tests PASS；未知官网发送控件回归也先 FAIL、修复后 PASS。`git diff --check` PASS。 |
+| 开发包与发行计划 | PASS | `npm run package:dev`、`npm run verify:artifacts`：`dist/zotero-chatgpt-0.1.1-dev.xpi`，87 files，SHA-256 `971867097927ee29f399b5f45b1633b3c8f7f512cfd628643ce22c3880c95205`。`npm run release:dry-run` 仅生成同一 hash 的本地计划，未发布。 |
+| 当前开发包无模型宿主 | PASS | Zotero 专用 `.zotero-chatgpt-dev/context-runs/wrapup-final-20260927/`，`host-report.json` 59/59，绑定同一 XPI hash 与 driverSourceHash `8809f0ed323ef1146fb2cc36685a475e40f616f73e9d2440d5f3718bcb81a27f`；recordedRequests=0。先前 `wrapup-20260927/` 的 59/59 对应旧 hash `48001ae8…`，只作为历史报告保留。设备、样本和性能口径见报告，不能据此推断真实服务。 |
+| 当前开发包官网嵌入探测 | FAIL | `.zotero-chatgpt-dev/embed/host-report.json` 对同一最终 XPI 执行 10 项检查，其中 `product-official-chat-actor-reaches-the-composer` 未通过：官网提供 `textarea#pending-home-input`，actor 报 `unsupported-composer`，没有已知发送按钮。旧报告另存为 `host-report-before-wrapup-20260927.json`。该探测没有输入账号、没有发送问题，也没有读取回答正文。 |
+| 营销源文件 | PASS | 嵌套 Remotion `npm run assets` 从本地素材准备 12 个资源，`npm run check:copy` 检查 31 条文案通过。Git 源文件本身不含演示视频和截图，单凭 checkout 无法独立出片。 |
+| 当前 XPI 的真实 ChatGPT 文献问答 | BLOCKED | 这次官网嵌入探测未识别受支持的输入框，所以没有继续提交带随机合成文献上下文的问题；`conversation-send` 在报告中为 NOT RUN。不能以页面可见或 9 项其它检查通过替代真实回答。 |
+| 真实 Codex、升级/回退与正式发行 | NOT RUN | 本轮未登录、未发模型请求，也未做最终 XPI 升级/回退与无 Node 安装。用户选择整理已有 GitHub Release，不发布新版本；v0.1.1 的已发布资产不等于本轮开发包。 |
+
+性能优化验证的是逐字输入不再重建 transcript 的结构性成本；未做输入延迟基准，因此不报告速度提升百分比。源码与本轮离线/无模型宿主检查不能代替真实 ChatGPT 文献上下文或真实 Agent 写入验收。
+
+## 2026-09-27 Chat 网页鼠标命中修复
+
+隔离宿主先前在官网 `textarea#pending-home-input` 状态测得 actor `unsupported-composer`；`chat/embed.ts` 因此把整个网页 browser 设为 `pointer-events: none`，导致页面可见但鼠标无法命中。该轮在受限 actor 响应 `unsupported-composer` 后恢复网页点击，但当时只拦截可识别的发送意图；本页上方的仓库收尾轮进一步修复了未知发送控件的缺口。当前规则是未知编辑器为空时网页可点击，有草稿时外部点击、提交与非 IME Enter 都由 actor 拦截，并显示失败提示。受控文献上下文提交仍要求受支持的编辑器。未修改 Chat/Agent 路由、认证或 Zotero 写入权限。
+
+| 层级或场景 | 状态 | 本轮证据与限制 |
+| --- | --- | --- |
+| 回归与离线门禁 | PASS | `embed-surface.test.ts` 在修改前复现 `none`（1 FAIL / 27 PASS）；未知编辑器的表单外 Send 控件回归也先 FAIL、修复后 PASS。最终 `npm run typecheck`、`npm run lint`、`npm run test:unit`（114 files / 1519 tests）、`npm run package:dev`、`npm run verify:artifacts`、`git diff --check` 均 PASS。最终开发 XPI `dist/zotero-chatgpt-0.1.1-dev.xpi` 为 87 files，SHA-256 `119e673fa02e6f4bd296cea69871192f0290aa3ff1eb70dd74e4098901b185d1`。 |
+| 真实 Zotero 网页命中状态 | PASS | 最终包 `.zotero-chatgpt-dev/embed/host-report.json`（专用 profile、合成 PDF、driverSourceHash `637f1766…`）在 `unsupported-composer` 下测得 browser 的内联与计算后 `pointer-events: auto`，窗口中心命中 browser；新增宿主断言同时检查两者并 PASS。未执行官网控件的人工鼠标点击。此前候选包报告按原名保留，不继承为最终包证据。 |
+| 官方 ChatGPT 输入与真实回答 | BLOCKED | 同一最终宿主报告在 60 秒内观察到官网 `div[role=textbox][contenteditable=true]`，其 form 有 3 个按钮，但没有受支持的发送按钮；actor 为 `unsupported-composer`，完整 embed 阶段因 `product-official-chat-actor-reaches-the-composer` FAIL。未发送模型请求、未读取账户或 transcript，网页可命中不等于文献上下文已交付或真实回答成功。 |
+| 日常 Zotero 安装与用户实际点击 | NOT RUN | 本轮只打包并加载到 `.zotero-chatgpt-dev/embed/` 专用 profile；未更新日常 profile，也未操作其中的网页。 |
+
+独立只读审查指出的两处缺口（宿主断言未检查实际命中、表单外明确 Send 控件未拦截）均已补回并复审，无新的阻断发现。审查本身不替代上述宿主报告。
+
+## 2026-09-27 用户反馈：UI 问题盘点
+
+以下四项是用户在真实使用后直接提出的体验问题，记录为反馈，不借此前无模型宿主 PASS 宣称视觉体验已通过。本节先保留原意，后续源码与界面盘点的发现另列，并区分可证实的机制和待实机复核的判断。
+
+1. `Paper & context details` 功能及其入口多余。
+2. 主界面与 Reader 界面的按钮功能和 UI 设计不一致。
+3. 界面文字太多。
+4. Agent 模式的设计观感差。
+
+### 当前工作树的源码盘点
+
+与上述反馈直接相关的机制：Reader 的 `More` 菜单在 Agent 模式只剩 `Paper & context details` 一个入口，却再打开第二层面板；该面板还承载“重新读取 PDF”和当前引用的“返回原文”，所以删除入口前须安置这些实际动作（`packages/zotero/src/chat/view.ts:704-708, 1623-1647`）。Reader 的 PDF 图标复制文件供用户粘贴到 ChatGPT，文库的 PDF 图标直接打开附件；Reader 的两项 ChatGPT 复制动作在 Agent 中仍常驻（`chat/view.ts:673-679, 1694-1708`；`views/library-agent-workbench.ts:171-173`）。文字密度来自 Reader 首次外发长说明、文库 Chat 常驻说明、Agent 空状态标题/说明和 Preferences 补充说明，并非单一字号问题（`chat/view.ts:240-242`；`views/library-agent-workbench.ts:181-182, 317-321`；`preferences/pane.ts:221-224`）。Reader 与文库 Agent 还分别使用模型弹出按钮和原生下拉框，文库图标在窗口宽度小于 1100px 时缩到 24×26px（`chat/view.ts:907-916`；`views/library-agent-workbench.ts:134, 215`）。这些结构差异可从源码确认；“丑”的具体视觉表现仍以用户观察为准，本轮未取得当前 XPI 的截图级复核。
+
+| 优先级 | 另发现的用户问题 | 源码依据与证据界限 |
+| --- | --- | --- |
+| 高 | 官方 ChatGPT 页面现在可点击，但当前隔离宿主仍未识别可支持的输入框；插件带文献上下文的正常提问链路尚未走通。 | 本文 §“Chat 网页鼠标命中修复”的最新报告记录 `unsupported-composer`、无已知发送按钮，真实回答为 BLOCKED；可点击只证明鼠标命中，不证明提交成功。 |
+| 高 | 切到 Chat 后，正在运行或等待审核的 Agent 工作缺少稳定的公共提示，用户可能误以为任务已停止或消失。 | Reader 普通任务在 Chat 被过滤，阅读任务另走一条显示条件；模式开关没有运行状态（`chat/view.ts:1675-1677, 2219-2223, 2255-2256, 2361-2362`）。源码确认显示路径不同；实际视觉仍待复核。 |
+| 高 | 在文库点击“整理选中条目”时，即使没有选中条目也能准备并发送；缺少范围的校验发生在 Codex 模型返回后，可能消耗一次无用轮次。 | 起步按钮无选中项检查（`views/library-agent-workbench.ts:184-196`）；`sendLibraryAgentMessage` 先于 `intent.kind === 'organize'` 的空范围拒绝（`library/agent-orchestrator.ts:193-210, 234-235`）。这是源码顺序结论，实际模型请求未运行。 |
+| 高 | 在常见窄主窗口中，文库 Chat 的当前文献标题被隐藏；切换 Zotero 选中项后，用户难以从插件确认下次提问绑定哪篇文章。 | Chat 把文献名写入标题，但 `@media (max-width:1100px)` 隐藏整个标题（`views/library-agent-workbench.ts:134, 316-321`）；选中变化会刷新绑定（同文件 `323-340`）。身份冻结逻辑不因此失效，问题在发送前可见性。 |
+| 中 | 文库 PDF 按钮在没有合格选中项时仍看起来可点，点后才报“选一篇有 PDF 的文章”。 | 禁用条件只看是否提供回调（`views/library-agent-workbench.ts:534-535`），回调在零项、多项或无唯一 PDF 时才拒绝（`index.ts:698-706`）。源码确认，具体外观未复核。 |
+| 中 | 文库 Agent 回答直接显示原始文本，Reader Agent 则解析 Markdown、数学公式和来源链接；相同服务的回答呈现质量不同。 | 文库用 `textContent` 填入 `line.text`（`views/library-agent-workbench.ts:374-378`），Reader 调用 `renderAnswer`、来源链接和代码块处理（`chat/view.ts:1518-1525`）。源码确认渲染路径不同，尚无当前版本的回答截图。 |
+| 中 | 文库 Agent 未登录或没有模型时，模型下拉框显示“Sign in for models”但被禁用；发送按钮只依据问题是否为空启用，恢复动作与主要动作分离。 | `views/library-agent-workbench.ts:381-386, 447-450`；最终登录/模型错误由 `library/agent-orchestrator.ts:193-201` 抛出。源码确认控件状态，实际视觉未复核。 |
+| 中 | Preferences 的语言、字号、模型及上下文开关即时保存，但 Agent instructions 需额外按 Save；离开页面前没有发现未保存内容的拦截。 | `preferences/pane.ts:571-592, 600-606`，`preferences/entry.ts:91-93`。源码确认两种保存规则；关闭窗口丢稿尚未实机复现。 |
+| 中 | 文库 Agent 的“跳转到消息”只覆盖当前会话最近 30 条，仍缺少查找、重开和继续不同文库 Agent 会话的真正历史入口。 | `views/library-agent-workbench.ts:348-359`；稳定的单一 library session ID 见 `index.ts:121-126`。这是功能范围缺口，当前入口已改名避免误称历史。 |
+
+以上问题盘点只做文档记录和源码检查；没有修改产品 UI、重跑宿主或请求真实模型。下节 UI 重构的 59/59 无模型检查只证明当时列出的 DOM/几何与流程断言，不构成这些使用体验的 PASS。现有产品规格 UI-01/UI-02 仍将 `Paper & context details` 和两项复制按钮写作目标；它们与这次用户反馈冲突，后续设计需连同必要的上下文状态、重读和返回原文入口一并修订，不能把旧规格视作本次反馈的否决理由。
+
+## 2026-09-27 用户路径 UI 重构
+
+本轮按产品文档的设计原则调整 Reader 与文库工作区的展示和操作，不改变 Chat/Agent 路由、写入权限、schema 或运行时。文库 Chat/Agent 头部只显示各自相关的工具；当前对话消息跳转不再冒称会话历史；文库 Agent 空状态聚焦输入并保留两项常见任务建议，Enter 发送、Shift+Enter 换行且 IME 组合不发送。新空状态文案随界面语言切换，Chat 区域的辅助技术名称也改为 ChatGPT。文库布局按条目区实际宽度堆叠，Reader 极窄侧栏的头部可分两行并保留复制按钮命中区。Preferences 说明同一开关对 Reader Chat 书目摘要、Reader Agent PDF 文本的不同作用，以及文库 Chat 的独立开关。无 Chat 通道时的文案不把 Agent 描述为等价替代。
+
+| 层级或场景 | 状态 | 本轮证据与限制 |
+| --- | --- | --- |
+| 静态、单元与产物 | PASS | `npm run typecheck`、`npm run lint`、`npm run test:unit -- --maxWorkers=1`（114 files / 1519 tests）、`npm run package:dev`、`npm run verify:artifacts` 均通过。最终开发 XPI `dist/zotero-chatgpt-0.1.1-dev.xpi`：87 files，SHA-256 `2b15cafa1e9b089f13951c242066683d6e7a30bbd2d12d39f39807cecc819139`。 |
+| 独立 Zotero 无模型用户路径与布局几何 | PASS | 最终 `.zotero-chatgpt-dev/context-runs/ui-refactor-20260927-e/host-report.json`：Zotero 9.0.6、1000×600 主窗、59/59、记录的模型请求 0，driverSourceHash `8809f0ed…`，绑定上述最终 XPI。实测文库 Chat 工具可见性、443px 条目区时上下堆叠，以及 Reader 约 291px 可用宽度下两行工具栏、32px 按钮和菜单落点；合成资料只写入专用 profile。此前 XPI `943b5081…` 的 `ui-refactor-20260927-d/` 与 `87ae2cac…` 的 `ui-refactor-20260927-c/` 均为 59/59，不继承为最终产物证据。 |
+| 前次窄宽度检查驱动 | FAIL | 较早包 `87ae2cac…` 的 `.zotero-chatgpt-dev/context-runs/ui-refactor-20260927-b/host-report.json` 在 16 项通过后超时：驱动只改 CSS 自定义变量，而产品实际把 dock 宽度以内联 `width` 和 `flex-basis` 固定。保留失败报告；改为临时调整同一布局属性并在检查后恢复，才得到后续 PASS。更早包 `5b8b2cda…` 的 `ui-refactor-20260927-a/` 为 56/56，未覆盖窄宽度检查。 |
+| 截图级视觉、主题、放大字号、真实 IME 与多窗口 | NOT RUN | 宿主报告提供 DOM 和几何证据，没有取得同尺寸截图或人工焦点/滚动检查；键盘与 IME 只有 DOM 回归，不能外推为真实输入体验。 |
+| 官方 ChatGPT 回答、Codex 候选与真实文献库 | NOT RUN | 本轮没有登录、发送模型请求或操作日常 Zotero 文献库。此前记录的真实 Chat 阻塞不因 UI 修改自动解除。 |
+
+测试用独立实例在报告完成后按完整 profile 路径核对并停止。此轮未提交、发布或安装到日常 profile。
+
+## 2026-09-27 新开发包后台宿主验收
+
+验收产物仍为下节 SHA-256 `e30682ebcb726b86db71ed6bb2ef63cab65e46c3d860c4a59e886000ab7c691e`。使用 `open -n -g` 启动独立 Zotero 9.0.6 实例及 `.zotero-chatgpt-dev/` 专用 profile/data；只停止完整参数匹配的自启进程，日常 Zotero 未作为测试对象。所有宿主报告以实际 XPI hash 和 driverSourceHash 区分；没有把失败重跑覆盖。
+
+| 用户场景 | 状态 | 本轮证据与限制 |
+| --- | --- | --- |
+| 文库/Reader 默认 Chat、显式 Agent、草稿与附件身份、PDF 引用跳页、设置启停 | PASS | 最终无模型 `context-runs/accept-e306-userpath-20260927/host-report.json` **56/56**。驱动先打开 `More → Paper & context details`，确认引用按钮可见再点击，原生 Reader 返回所引页；Preferences 启停后面板数 1→0→1。较早 `accept-e306-hidden-20260927/` 和 `accept-e306-background-20260927/` 均在直接点击折叠面板内隐藏引用按钮时 FAIL（36 项），随后同包旧驱动的 `accept-e306-background-r2-20260927/` 55/55 PASS；旧 XPI `e3216ba5…` 对照 55/55 PASS。失败为不符合用户路径的驱动点击及间歇性证据，原报告保留，不宣称产品导航始终无问题。 |
+| 原生动作、公开主题发现与 DOI 获取 | PASS | `context-runs/accept-e306-acquire-20260927/host-report.json` **24/24**。合成条目高亮/整理等原生阶段通过；OpenAlex 固定主题返回 3 个 OA 候选，未写库。独立固定公开 DOI `10.1371/journal.pone.0345574` 经 Zotero translator 预览、审批前零条目写入、批准后原生条目和目标集合读回，以及 OA PDF 附件父条目/MIME/SHA-256 读回均通过。主题结果**未包含**该 DOI，因此这两段不能合称为“从搜索结果保存”。此驱动打包工作树适配器，不能证明已安装 XPI 的模型/UI 路由。 |
+| 官方网页 Chat：复制信息、复制 PDF 文件（旧驱动实测） | PASS | 固定报告 `.zotero-chatgpt-dev/verification/accept-e306-20260927/embed-e306-clipboard-probe-report.json` 绑定 XPI `e30682eb…` 与旧 driverSourceHash `b7f16a32…`，15 项白名单检查通过：书目信息只含合成标题/作者、不含 PDF 正文；PDF 文件进入文件型剪贴板，界面提示“PDF copied — paste to attach”。测试夹具原先缺作者、驱动原先硬查旧英文 `clipboard` 文案，两个失败报告也已归档。复制成功不代表官网已接收附件。当前驱动默认跳过共享剪贴板检查，修订后这两项宿主验收 NOT RUN，不能把旧 PASS 当作安全默认分支的重测。 |
+| 官方网页真实提问与回答 | BLOCKED | 同一固定 embed 报告：`https://chatgpt.com/` 内仅观察到 `pending-home-input` textarea，发送按钮数 0，产品 actor 为 `unsupported-composer`；等待后仍未达到发送准备态，**0 模型轮次**。未发送问题、未读取账号或远端 transcript；不能区分官网加载/认证状态与页面结构变更，不把页面 URL 已打开报为 Chat 成功。 |
+| Agent 真实 Sol/Luna 高亮与文库整理 | BLOCKED | `.zotero-chatgpt-dev/live/host-report.json` 的新 XPI 运行时 ready，但专用 profile 为 `signedOut`，驱动进入官方登录等待；没有点击登录或发送模型请求，随后仅停止自启实例。新 XPI 的真实模型候选、审批及写入读回仍未验收。 |
+| 截图级布局、深浅主题、字号、IME、焦点与多窗口 | NOT RUN | 后台自动驱动检查了若干 DOM/几何和 PDF 锚点，但没有取得同尺寸多主题截图或在可操作窗口完成这批人工步骤；不能把 56 项无模型检查外推为完整视觉体验 PASS。 |
+| 测试对共享剪贴板的隔离 | FAIL | embed 驱动的复制控件测试曾写入 macOS 共享剪贴板，与用户“不打扰其他任务”的要求冲突。发现后停止该阶段；没有读取或尝试恢复用户随后使用的剪贴板内容。驱动现默认跳过复制检查，仅显式 `--clipboard-probe` 才运行，且开发文档标明不得用于后台验收。此修订不能抹去已经发生的共享剪贴板写入。 |
+
+本轮没有提交、安装到日常 profile 或发布。真实 Chat 与 Agent 的两处阻塞及截图级项目仍未完成验收。
+验收驱动修订后的最终后台门禁：`npm run typecheck`、`npm run lint`、`npm run test:unit -- --maxWorkers=1`（114 files / **1515 tests**）与 `git diff --check` 均 PASS；产物复核 `npm run verify:artifacts` PASS（87 files），XPI SHA 仍为 `e30682eb…`。
+
+## 2026-09-27 后台修复候选
+
+基于下节用户路径盘点，本轮只处理文库整理的候选边界、文库 Chat 初始化报错与 Preferences 跨启用周期的注册清理。仍在 `main` 工作树，manifest `0.1.1`；原有 `.gitignore`、`tests/host/embed-driver.js` 及营销文件改动保留，未提交或公开发布。本轮重新打包的开发 XPI `dist/zotero-chatgpt-0.1.1-dev.xpi` 为 99,599,410 bytes，SHA-256 `e30682ebcb726b86db71ed6bb2ef63cab65e46c3d860c4a59e886000ab7c691e`，与下节原候选 `e3216ba5…` 不同。
+
+| 层级或用户场景 | 状态 | 本轮证据与边界 |
+| --- | --- | --- |
+| 文库 Agent 整理预览 | PASS | 新增真实 `ActionTaskController` 回归：带显示 `name` 的集合原先被严格 native target 校验拒绝（RED），现在仅把 `clientId/libraryId/collectionKey` 传给任务控制器，预览进入 review（GREEN）。保留模型输入中的显示名称与冻结索引。旧 Silver 失败的原始模型输出没有安全结构化记录，故不能证明它当时只有这一处原因；当前真实模型轮次 NOT RUN。 |
+| 文库 Chat 初始化失败与重开 | PASS | 两条 DOM 回归原先分别表现为同步抛错后 `role=alert` 隐藏、成功重开后旧错误仍显示（RED）；现均通过（GREEN）。真实 Zotero/官网故障频率 NOT RUN。红测日志保存在 `.zotero-chatgpt-dev/verification/ux-background-20260927/chat-error-red.log`。 |
+| Preferences 旧注册与新启用交错 | PASS | 按本机 Zotero 9.0.6 `omni.ja` 的 `preferencePanes.js` 顺序构造两条异步 resolve/reject 回归：原 `remove()` 立即返回，旧代可按固定 ID 清掉新面板（RED）；现 `remove()` 等待在途注册，插件 `shutdown()` 等待清理，回归 GREEN。旧宿主超时报告缺终态 pane 数，不能证明其根因正是此竞态；新 XPI 的真实启停宿主验收 NOT RUN。测试 driver 已补白名单面板数量及时间序列，未采集原始错误文本。 |
+| 本地门禁和产物 | PASS | `npm run typecheck`、`npm run lint`、`npm run test:unit -- --maxWorkers=1`（114 files / 1514 tests）、`npm run package:dev`、`npm run verify:artifacts`（87 files）均通过。 |
+| 新 XPI 的真实 Zotero、ChatGPT/Codex 与截图级体验 | NOT RUN | 按用户要求本轮仅后台工作，未启动/控制 Zotero 窗口，未登录、发送模型请求或写入日常文献库。下节旧产物的宿主 PASS/FAIL 不继承为新 XPI 结果。 |
+
+本节是代码与离线验证证据；正式判断 Preferences 间歇故障及真实整理是否解决，仍需在不打扰日常 Zotero 的独立可交互宿主条件下复测新 XPI。
+独立只读 diff 审查未发现可操作的正确性或回归问题；审查没有运行宿主或服务。`git diff --check` PASS，已有用户未提交改动未被覆盖。
+
+## 2026-09-27 用户路径测试盘点
+
+本轮测试 `main` 的 `9c9f3f0`，manifest `0.1.1`，macOS arm64 / Zotero 9.0.6 / Node 24.11.0 / npm 11.6.1。测试前已有 `.gitignore`、`tests/host/embed-driver.js` 和未跟踪营销文件等改动，本轮没有修改产品源码或这些文件。重新打包的 `dist/zotero-chatgpt-0.1.1-dev.xpi` 为 99,599,253 bytes，SHA-256 `e3216ba5d519ab93986b0d935fbb0158a70b1c213e842c504a2127d9a5f2a7d8`，与测试前的开发 XPI 逐字节一致。宿主只使用新建的 `.zotero-chatgpt-dev/context-runs/audit-20260927-*/` 专用 profile 和合成资料；没有操作日常文献库。
+
+| 用户场景或层级 | 状态 | 本轮证据与限制 |
+| --- | --- | --- |
+| 本地门禁和开发包 | PASS | `npm run typecheck`、`npm run lint`、`npm run test:unit`（114 files / 1509 tests）、`npm run package:dev`、`npm run verify:artifacts`（87 files）均通过。 |
+| 打开文库/Reader、默认 Chat、显式切 Agent、切回、附件与草稿、PDF 阅读位置、设置语言 | PASS | 新专用 profile 的第二轮无模型宿主报告 `context-runs/audit-20260927-context-r2/host-report.json`：55/55，产物 SHA 如上，driverSourceHash `c8a575fd…`，记录的模型请求 0。包括主窗口无 PDF 入口、原生详情栏保留、同名附件区分和设置面板挂载；不代表官网真实回答或截图级视觉验收。 |
+| 禁用再启用插件后打开 Preferences | FAIL | 第一轮 `context-runs/audit-20260927-context/host-report.json` 在前 54 项通过后，`pref-pane-single-after-reenable` 等待 30 秒超时。相同产物与 driver 的第二轮该项 PASS；故障目前呈间歇性，尚未确定是插件注册还是 Zotero 宿主时序。保留两个报告，不以重跑覆盖首次 FAIL。 |
+| 整理预览/批准/撤销、原生高亮与 Figure 圈画读回 | PASS | `context-runs/audit-20260927-native/host-report.json`：20/20；只对隔离资料运行。原生驱动打包的是工作树生产适配器，候选为合成输入，不能证明已安装 XPI 的模型输出校验，也不能推翻下节真实 Silver 整理 FAIL。 |
+| 独立人工窗口的截图级操作 | BLOCKED | 已准备并启动 `context-runs/audit-20260927-user/` 无 driver profile，但当前 UI 控制工具只绑定到同时运行的日常 Zotero 进程。未在日常文献库点击测试动作；关闭了自己的测试进程。窄/宽侧栏、深色主题、字号、IME 和多窗口视觉行为没有本轮人工验收。 |
+| 真实官网 ChatGPT 回答、真实 Codex 候选、主题发现到 OA PDF 保存 | NOT RUN | 本轮没有登录、发送真实模型请求或执行外部 PDF 下载。Reader 的历史真实 Chat/Agent 演示见下节，不能冒充本轮复测；主窗口 Chat 完整官网链路与主题发现完整链路仍缺当前验证。 |
+
+用户角度的待处理问题：先调查 Preferences 重启后的间歇性超时，再复现下节已记录的真实文库整理输入校验失败。主窗口 Chat 的真实回答、主题发现到 OA PDF 附件、窄窗/IME/多窗口属于验收缺口，不能从上述 PASS 推定成功。
+
+### 同日后台用户场景复核
+
+用户要求测试在后台进行，不打断其它桌面任务；本阶段只运行本地 Vitest 和源码/证据审查，没有启动、聚焦或操作 Zotero 窗口，也没有调用真实服务。
+
+| 场景 | 状态 | 证据与结论 |
+| --- | --- | --- |
+| 文库工作区、官方 Chat 桥、Reader 焦点/尺寸、整理与请求恢复的定向回归 | PASS | `npm run test:unit -- <12 个相关测试文件> --maxWorkers=1`：12 files / 138 tests。它们是 DOM/适配器替身，不证明真实页面、模型与 Zotero GUI 体验。 |
+| 主窗口 Chat 初始化同步失败时显示可恢复错误 | FAIL | 临时 DOM 复现使 `showChat` 同步抛错：面板已经打开，但 `role=alert` 仍隐藏。失败日志及临时用例副本保存在 `.zotero-chatgpt-dev/verification/ux-background-20260927/sync-chat-open-error.{log,test.ts}`；仓库测试文件已移除。生产包装器在 `libraryChat.show()` 报 `error` 时也会同步抛错，而工作区的 `.then().catch()` 只处理 Promise 拒绝。真实 Zotero 触发频率 NOT RUN。 |
+| 延迟打开 Chat 后用户立即点回 Agent | NOT RUN | 延迟 `showChat` 的临时 DOM 替身会复现模式选择被后来完成的 Chat 覆盖；但当前生产包装器同步返回已兑现的 Promise，未发现真实用户点击可插入该延迟的证据，因此不列为当前已确认缺陷。探索日志保存在同一后台验证目录。 |
+| 文库 Agent 的键盘、历史与窄面板体验 | NOT RUN | 源码显示文库 Agent 仅用 Cmd/Ctrl+Enter 提交且输入框没有该提示，Reader 原生输入提示 Enter 提交；文库“历史”仅导航当前记录的最近 30 条；堆叠布局以整个窗口 1150px 断点决定。实际 IME、窄文献区、主题和字号效果尚无本轮 GUI 实测，这些是待验证的体验风险，不报为视觉缺陷。 |
+
+以上 FAIL 只覆盖隔离 DOM 的同步错误路径；没有修改产品代码。后台复核也未重新运行真实 Silver 整理、主窗口官网 Chat 回答或发现到 PDF 保存。
 
 ## 2026-09-24 README 与 Silver 论文演示
 

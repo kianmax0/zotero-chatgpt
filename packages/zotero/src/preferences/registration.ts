@@ -31,8 +31,8 @@ export interface PreferencePaneRegistrar {
   readonly id: string | undefined;
   /** Register the pane once; returns the pane id or undefined after an honest failure. */
   ensure(): Promise<string | undefined>;
-  /** Unregister the pane if this session registered one. Safe to call repeatedly. */
-  remove(): void;
+  /** Wait for in-flight registration, then unregister this session's pane. Safe to call repeatedly. */
+  remove(): Promise<void>;
 }
 export interface PreferencePaneRegistrarHost {
   panes: PreferencePaneRegistry | undefined;
@@ -48,6 +48,8 @@ function failure(error: unknown): string {
 export function createPreferencePaneRegistrar(host: PreferencePaneRegistrarHost): PreferencePaneRegistrar {
   let id: string | undefined;
   let stopped = false;
+  let pendingRegistration: Promise<string | undefined> | undefined;
+  let pendingRemoval: Promise<void> | undefined;
   const options = (): PreferencePaneOptions => ({
     pluginID: host.pluginID,
     id: PREFERENCES_PANE_ID,
@@ -58,42 +60,50 @@ export function createPreferencePaneRegistrar(host: PreferencePaneRegistrarHost)
     defaultXUL: true,
   });
   const register = async (): Promise<string> => host.panes!.register(options());
-  return {
-    get id() { return id; },
-    async ensure(): Promise<string | undefined> {
-      if (stopped || id) return id;
-      if (!host.panes) return undefined;
-      let registered: string;
+  const ensureOnce = async (): Promise<string | undefined> => {
+    let registered: string;
+    try {
+      registered = await register();
+    } catch (error) {
+      // Shutdown must not clear a pane from a later plugin enable while an older registration
+      // finishes. Zotero unregisters by fixed id, without checking which generation owns it.
+      if (stopped) return undefined;
       try {
+        // A previous enable in the same session can still own the fixed id.
+        host.panes!.unregister(PREFERENCES_PANE_ID);
         registered = await register();
-      } catch (error) {
-        try {
-          // A previous enable in the same session can still own the fixed id.
-          host.panes.unregister(PREFERENCES_PANE_ID);
-          registered = await register();
-        } catch (retry) {
-          host.logError(new Error(`The Zotero ChatGPT preferences pane could not be registered: ${failure(error)}; retry: ${failure(retry)}`));
-          return undefined;
-        }
-      }
-      // Registration is asynchronous; a shutdown that raced it must still clean the pane up.
-      if (stopped) {
-        try { host.panes.unregister(registered); } catch (error) { host.logError(new Error(`The Zotero ChatGPT preferences pane could not be unregistered: ${failure(error)}`)); }
+      } catch (retry) {
+        host.logError(new Error(`The Zotero ChatGPT preferences pane could not be registered: ${failure(error)}; retry: ${failure(retry)}`));
         return undefined;
       }
-      id = registered;
-      return id;
+    }
+    if (stopped) {
+      try { host.panes!.unregister(registered); } catch (error) { host.logError(new Error(`The Zotero ChatGPT preferences pane could not be unregistered: ${failure(error)}`)); }
+      return undefined;
+    }
+    id = registered;
+    return id;
+  };
+  return {
+    get id() { return id; },
+    ensure(): Promise<string | undefined> {
+      if (stopped || id) return Promise.resolve(id);
+      if (!host.panes) return Promise.resolve(undefined);
+      if (!pendingRegistration) pendingRegistration = ensureOnce();
+      return pendingRegistration;
     },
-    remove(): void {
-      const registered = id;
-      id = undefined;
+    remove(): Promise<void> {
+      if (pendingRemoval) return pendingRemoval;
       stopped = true;
-      if (!registered || !host.panes) return;
-      try {
-        host.panes.unregister(registered);
-      } catch (error) {
-        host.logError(new Error(`The Zotero ChatGPT preferences pane could not be unregistered: ${failure(error)}`));
-      }
+      pendingRemoval = (async () => {
+        await pendingRegistration;
+        const registered = id;
+        id = undefined;
+        if (!registered || !host.panes) return;
+        try { host.panes.unregister(registered); }
+        catch (error) { host.logError(new Error(`The Zotero ChatGPT preferences pane could not be unregistered: ${failure(error)}`)); }
+      })();
+      return pendingRemoval;
     },
   };
 }

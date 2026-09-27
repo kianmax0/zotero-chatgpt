@@ -1,13 +1,16 @@
 import { NativeOperationError, type NativeActionPort, type NativeFigureCalloutInput, type NativeFigureSelection, type NativeMetadata, type NativeOrganizationItemSnapshot } from '../../packages/contracts/src/native.ts';
+import type { ActionTaskRecord } from '../../packages/contracts/src/tasks.ts';
 import { ReaderError, type DocumentContext, type ImageAttachment, type PaperScope } from '../../packages/contracts/src/index.ts';
 import type { LibraryReferencePort } from '../../packages/contracts/src/workspace.ts';
 import { ActionTaskController } from '../../packages/core/src/tasks/controller.ts';
+import { discoverScholarlyWorks } from '../../packages/core/src/discovery/scholarly.ts';
 import { createNativeActionPortFrom } from '../../packages/zotero/src/actions/native.ts';
 import type { NativeHostCollection, NativeHostItem, NativeZoteroHost } from '../../packages/zotero/src/host/native.ts';
 import { nativeDocumentSource, ReaderDocumentCache } from '../../packages/zotero/src/reader/document.ts';
 import { nativeSourceNavigator, openSourcePage } from '../../packages/zotero/src/reader/source-highlight.ts';
 import type { HostReader, ZoteroHost, ZoteroWindow } from '../../packages/zotero/src/reader/host-types.ts';
 import { createLibraryReferencePort } from '../../packages/zotero/src/library/reference.ts';
+import { createOpenAlexDiscoveryPort } from '../../packages/zotero/src/library/discovery.ts';
 import { geckoHost } from '../../packages/zotero/src/runtime/gecko.ts';
 import { checkPath, GeckoStorage, privateDirectory, type FileHost } from '../../packages/zotero/src/runtime/storage.ts';
 
@@ -64,7 +67,7 @@ declare const PathUtils: { profileDir: string; join(...parts: string[]): string 
 declare const ChromeUtils: { importESModule(uri: string): { AddonManager: { getAddonByID(id: string): Promise<{ isActive: boolean; version: string } | null> } } };
 declare const Services: { appinfo: { OS: string; XPCOMABI: string; platformVersion?: string } };
 
-type Evidence = 'real-host-api' | 'synthetic-proposal-real-host-write' | 'synthetic-user-edit-real-host-api' | 'real-network-translator';
+type Evidence = 'real-host-api' | 'synthetic-proposal-real-host-write' | 'synthetic-user-edit-real-host-api' | 'real-network-translator' | 'real-network-openalex' | 'real-network-acquisition';
 interface SmokeCheck { name: string; evidence: Evidence; status: 'running' | 'passed' | 'failed'; ok?: boolean; startedAt: string; completedAt?: string; details?: Record<string, unknown>; failure?: { code: string; message?: string } }
 export interface NativeSmokeReport {
   schemaVersion: 1;
@@ -72,7 +75,7 @@ export interface NativeSmokeReport {
   runId: string;
   startedAt: string;
   completedAt?: string;
-  status: 'running' | 'passed' | 'partial' | 'failed';
+  status: 'running' | 'passed' | 'failed';
   build: { expectedVersion: string; expectedArtifactHash: string; artifactHashSource: 'prepare-script'; adapterSource: 'working-tree-production-modules-in-test-driver'; subjectScope: 'installed-addon-identity-only'; driverSourceHash: string | null; actualVersion?: string };
   environment?: { zotero: string; os: string; abi: string; width: number; height: number; dpr: number };
   driverIssuedModelRequests: 0;
@@ -80,7 +83,7 @@ export interface NativeSmokeReport {
   verificationToken: string;
   checks: SmokeCheck[];
   notRun: Array<{ name: string; reason: string }>;
-  retained?: { parentKey: string; attachmentKeys: string[]; collectionKey: string; taskIds: string[]; ledger: string; manuallyEditedAnnotationKey?: string; organizationItemKeys?: string[]; organizationCollectionKey?: string };
+  retained?: { parentKey: string; attachmentKeys: string[]; collectionKey: string; taskIds: string[]; ledger: string; manuallyEditedAnnotationKey?: string; organizationItemKeys?: string[]; organizationCollectionKey?: string; acquisitionCollectionKey?: string; acquisitionItemKey?: string; acquisitionAttachmentKey?: string };
 }
 class SmokeFailure extends Error { constructor(readonly code: string) { super(code); this.name = 'NativeSmokeFailure'; } }
 function requireCheck(ok: unknown, code: string): asserts ok { if (!ok) throw new SmokeFailure(code); }
@@ -133,7 +136,6 @@ export async function runHostSmoke(config: NativeSmokeConfig): Promise<NativeSmo
     driverIssuedModelRequests: 0, modelProposalSource: 'deterministic-synthetic-fixture', verificationToken, checks: [],
     notRun: [
       { name: 'real-model-proposal', reason: 'The driver supplies explicit synthetic annotation proposals. They are not model output.' },
-      { name: 'oa-pdf-acquisition-and-correspondence', reason: 'This bounded smoke does not download external PDFs. Real network evidence is limited to unsaved DOI metadata translation.' },
       { name: 'official-login-and-credentials', reason: 'No login flow or authentication file is inspected.' },
       { name: 'installed-subject-ui-feature-wiring', reason: 'This smoke calls working-tree production adapters bundled in the test driver. Installed subject version/hash identify the host setup, not final XPI feature wiring.' },
       { name: 'citation-link-click-in-model-answer', reason: 'The click handler binds a verbatim quote supplied in a live-model answer. This driver exercises the production locate/navigate path with an explicit synthetic fixture quote instead, which is not model output.' },
@@ -455,18 +457,137 @@ export async function runHostSmoke(config: NativeSmokeConfig): Promise<NativeSmo
       requireCheck(undo.status === 'trashed' && trashed && trashed.deleted, 'SYNTHETIC_METADATA_UNDO_FAILED');
       return { value: true, details: { metadataSource: 'local deterministic mock fixture', nativeItemKey: reservedKey, collectionKey: fixture.collection.key, movedToTrash: true, realNetworkAcquisition: false, realModelOutput: false } };
     });
-    await step('public-doi-unsaved-native-translator-preview', 'real-network-translator', async () => {
-      const doi = '10.1038/nature14539'; const before = (await Zotero.Items.getAll(libraryID, false, true, true)).sort((a, b) => a - b);
-      const abort = new AbortController(); const timeout = window!.setTimeout(() => abort.abort(), 45000);
+    await step('topic-discovery-openalex-read-only', 'real-network-openalex', async () => {
+      const controller = new AbortController(); const timeout = window!.setTimeout(() => controller.abort(), 20000);
       try {
-        const preview = await native.previewMetadata({ identifier: doi }, abort.signal);
-        requireCheck(preview.source === 'identifier' && preview.candidates.length > 0 && preview.candidates.every(item => item.DOI?.toLowerCase() === doi && !!item.title), 'PUBLIC_DOI_PREVIEW_UNVERIFIED');
+        const before = (await Zotero.Items.getAll(libraryID, false, true, true)).sort((a, b) => a - b);
+        const preview = await discoverScholarlyWorks(createOpenAlexDiscoveryPort(Zotero), {
+          topic: 'machine learning', limit: 3, openAccessOnly: true, yearFrom: 2020, yearTo: new Date().getFullYear(),
+        }, controller.signal);
         const after = (await Zotero.Items.getAll(libraryID, false, true, true)).sort((a, b) => a - b);
-        requireCheck(JSON.stringify(before) === JSON.stringify(after), 'UNSAVED_TRANSLATOR_CHANGED_LIBRARY');
-        return { value: true, details: { inputDOI: doi, candidateCount: preview.candidates.length, titles: preview.candidates.map(item => item.title), libraryItemIDsUnchanged: true, saved: false, pdfDownloaded: false } };
+        requireCheck(preview.source === 'openalex' && preview.candidates.length > 0 && preview.candidates.length <= 3
+          && preview.candidates.every(candidate => candidate.openAccess.isOpenAccess && candidate.source.provider === 'openalex')
+          && JSON.stringify(before) === JSON.stringify(after), 'OPENALEX_DISCOVERY_UNVERIFIED');
+        const acquisitionDOI = '10.1371/journal.pone.0345574';
+        return { value: true, details: {
+          source: preview.source, candidateCount: preview.candidates.length, openAccessOnly: preview.query.openAccessOnly,
+          query: preview.query.topic, years: [preview.query.yearFrom, preview.query.yearTo],
+          fixedAcquisitionDOIAppearedInSearch: preview.candidates.some(candidate => candidate.doi?.toLowerCase() === acquisitionDOI),
+          libraryItemIDsUnchanged: true,
+        } };
       } finally { window!.clearTimeout(timeout); }
     }, true);
-    report.status = report.checks.some(check => check.status === 'failed') ? 'partial' : 'passed';
+
+    const acquisitionDOI = '10.1371/journal.pone.0345574';
+    let acquisitionReview: Extract<ActionTaskRecord, { kind: 'acquisition' }> | undefined;
+    let acquisitionCollection: SmokeCollection | undefined;
+    await step('acquisition-plan-public-doi-review-without-library-write', 'real-network-translator', async () => {
+      const target = new Zotero.Collection(); target.libraryID = libraryID; target.name = `[Synthetic acquisition target] ${report.runId}`; await target.saveTx();
+      acquisitionCollection = target;
+      if (report.retained) report.retained.acquisitionCollectionKey = target.key;
+      const before = (await Zotero.Items.getAll(libraryID, false, true, true)).sort((a, b) => a - b);
+      const planned = await taskController.planAcquisition({
+        conversationId: host.uuid(), question: 'Synthetic acceptance: review this fixed public DOI before saving it.',
+        target: { clientId, libraryId: libraryID, collectionKey: target.key }, identifiers: [acquisitionDOI],
+      });
+      if (planned.kind === 'acquisition') acquisitionReview = planned;
+      const item = planned.kind === 'acquisition' ? planned.items[0] : undefined;
+      const matching = item?.preview?.candidates.filter(candidate => candidate.DOI?.toLowerCase() === acquisitionDOI) ?? [];
+      const after = (await Zotero.Items.getAll(libraryID, false, true, true)).sort((a, b) => a - b);
+      requireCheck(planned.kind === 'acquisition' && planned.state === 'review' && !planned.approvedAt
+        && planned.items.length === 1 && item?.status === 'candidate' && matching.length === 1
+        && item.duplicates.length === 0 && JSON.stringify(before) === JSON.stringify(after)
+        && target.getChildItems().length === 0, 'ACQUISITION_REVIEW_OR_PREAPPROVAL_WRITE_FAILED');
+      return { value: true, details: {
+        doi: acquisitionDOI, taskState: planned.state, candidateCount: matching.length, duplicateCount: item.duplicates.length,
+        nativeItemIDsUnchangedBeforeApproval: true, targetCollectionEmptyBeforeApproval: true,
+        source: 'Zotero DOI translator', approved: false,
+      } };
+    }, true);
+
+    let acquisitionApproved: Extract<ActionTaskRecord, { kind: 'acquisition' }> | undefined;
+    const reviewEntry = acquisitionReview?.items[0];
+    const matchingReviewCandidate = reviewEntry?.preview?.candidates.some(candidate => candidate.DOI?.toLowerCase() === acquisitionDOI) ?? false;
+    if (acquisitionReview?.state === 'review' && reviewEntry?.status === 'candidate' && matchingReviewCandidate) {
+      await step('acquisition-user-approval-and-metadata-create', 'real-network-acquisition', async () => {
+        const entry = reviewEntry;
+        const candidateIndex = entry.preview!.candidates.findIndex(candidate => candidate.DOI?.toLowerCase() === acquisitionDOI);
+        requireCheck(candidateIndex >= 0 && entry.duplicates.length === 0, 'ACQUISITION_APPROVAL_CANDIDATE_UNSAFE');
+        const approved = await taskController.approve(acquisitionReview!.id, [entry.id], {
+          [entry.id]: { metadataIndex: candidateIndex, downloadPDF: true },
+        });
+        if (approved.kind === 'acquisition') acquisitionApproved = approved;
+        const result = approved.kind === 'acquisition' ? approved.items[0] : undefined;
+        requireCheck(approved.kind === 'acquisition' && !!approved.approvedAt && result?.created === true
+          && !!result.item && result.item.key === entry.reservedKey && result.item.libraryId === libraryID,
+        'ACQUISITION_METADATA_WRITE_NOT_CONFIRMED');
+        return { value: true, details: {
+          taskState: approved.state, metadataCreated: true, targetCollectionKey: acquisitionCollection?.key ?? null,
+          pdfResult: result.acquisition?.status ?? 'no-result', pdfUnavailableReason: result.acquisition?.status === 'unavailable' ? result.acquisition.reason : null,
+        } };
+      }, true);
+    } else {
+      report.notRun.push({ name: 'acquisition-user-approval-and-metadata-create', reason: 'The external DOI metadata preview did not produce one safe review candidate.' });
+      report.notRun.push({ name: 'acquisition-native-metadata-readback', reason: 'No acquisition candidate reached approval.' });
+      report.notRun.push({ name: 'oa-pdf-download-and-native-readback', reason: 'No acquisition candidate reached approval.' });
+    }
+
+    if (acquisitionApproved) {
+      const savedItem = acquisitionApproved.items[0];
+      if (savedItem?.item) {
+        await step('acquisition-native-metadata-and-collection-readback', 'real-host-api', async () => {
+          const readback = await native.inspectItem(savedItem.item!);
+          const actual = readback ? Zotero.Items.getByLibraryAndKey(libraryID, readback.key) : undefined;
+          const itemIDs = await Zotero.Items.getAll(libraryID, false, true, true);
+          requireCheck(!!readback && actual !== false && !!actual && readback.key === savedItem.item!.key && readback.metadata.DOI?.toLowerCase() === acquisitionDOI
+            && readback.collectionKeys.includes(acquisitionCollection!.key) && itemIDs.includes(actual.id),
+          'ACQUISITION_METADATA_NATIVE_READBACK_FAILED');
+          if (report.retained) report.retained.acquisitionItemKey = readback.key;
+          return { value: true, details: { doiMatched: true, targetCollectionMembership: true, nativeReadback: true, itemKey: readback.key } };
+        });
+      } else {
+        report.notRun.push({ name: 'acquisition-native-metadata-readback', reason: 'Approval did not confirm a created native item.' });
+      }
+
+      const savedAcquisitionItem = savedItem?.item;
+      const acquisitionResult = savedItem?.acquisition;
+      if (savedItem && savedAcquisitionItem && acquisitionResult?.status === 'attached') {
+        await step('oa-pdf-download-and-native-readback', 'real-network-acquisition', async () => {
+          const snapshot = await native.inspectAttachment(acquisitionResult.attachment);
+          const actual = Zotero.Items.getByLibraryAndKey(libraryID, acquisitionResult.attachment.key);
+          const parent = Zotero.Items.getByLibraryAndKey(libraryID, acquisitionResult.attachment.parentKey);
+          requireCheck(!!snapshot && actual !== false && !!actual && actual.isPDFAttachment() && parent !== false && !!parent && actual.parentID === parent.id
+            && snapshot.parentKey === acquisitionResult.attachment.parentKey && snapshot.contentType === 'application/pdf'
+            && snapshot.sha256 === acquisitionResult.attachment.sha256 && /^[a-f0-9]{64}$/u.test(snapshot.sha256)
+            && savedAcquisitionItem.attachmentKeys.includes(snapshot.key), 'OA_PDF_NATIVE_READBACK_MISMATCH');
+          if (report.retained) report.retained.acquisitionAttachmentKey = snapshot.key;
+          return { value: true, details: {
+            outcome: 'attached-and-read-back', parentMatched: true, contentType: snapshot.contentType,
+            digestMatched: true, digest: snapshot.sha256, downloadedPDFBodyRecorded: false,
+          } };
+        }, true);
+      } else {
+        const status = acquisitionResult?.status ?? 'missing-result';
+        const reason = acquisitionResult?.status === 'unavailable' || acquisitionResult?.status === 'uncertain' ? acquisitionResult.reason : null;
+        await step('oa-pdf-download-and-native-readback', 'real-network-acquisition', async () => {
+          const current = savedItem?.item ? await native.inspectItem(savedItem.item) : null;
+          const actualHasNoPDF = !!current && current.attachmentKeys.every(keyValue => {
+            const child = Zotero.Items.getByLibraryAndKey(libraryID, keyValue);
+            return !child || !child.isPDFAttachment();
+          });
+          report.checks.at(-1)!.details = { outcome: status, reason, metadataOnly: savedItem?.status === 'metadata-only', noPDFReadback: actualHasNoPDF };
+          requireCheck(false, status === 'unavailable' ? 'OA_PDF_UNAVAILABLE_METADATA_ONLY' : status === 'uncertain' ? 'OA_PDF_IDENTITY_UNCERTAIN' : 'OA_PDF_RESULT_MISSING');
+        }, true);
+      }
+    } else if (!acquisitionReview || acquisitionReview.state !== 'review' || !reviewEntry || reviewEntry.status !== 'candidate' || !matchingReviewCandidate) {
+      if (!report.notRun.some(entry => entry.name === 'acquisition-user-approval-and-metadata-create')) report.notRun.push({ name: 'acquisition-user-approval-and-metadata-create', reason: 'The DOI preview did not produce one safe candidate in review.' });
+      if (!report.notRun.some(entry => entry.name === 'acquisition-native-metadata-readback')) report.notRun.push({ name: 'acquisition-native-metadata-readback', reason: 'No acquisition candidate reached approval.' });
+      if (!report.notRun.some(entry => entry.name === 'oa-pdf-download-and-native-readback')) report.notRun.push({ name: 'oa-pdf-download-and-native-readback', reason: 'No acquisition candidate reached approval.' });
+    } else {
+      report.notRun.push({ name: 'acquisition-native-metadata-readback', reason: 'Approval did not confirm a native metadata item.' });
+      report.notRun.push({ name: 'oa-pdf-download-and-native-readback', reason: 'Approval did not confirm a native metadata item.' });
+    }
+    report.status = report.checks.some(check => check.status === 'failed') ? 'failed' : 'passed';
   } catch (error) {
     report.status = 'failed';
     if (!report.checks.some(check => check.status === 'failed')) report.checks.push({ name: currentStage, evidence: 'real-host-api', status: 'failed', ok: false, startedAt: new Date().toISOString(), completedAt: new Date().toISOString(), failure: safeFailure(error) });

@@ -11,9 +11,11 @@
 
 默认进入 Chat，且 Chat 不发起任何 Codex 请求。Agent 的写入只作用于本次指定的论文或集合：明确要求且验证通过的高亮自动写入，其余改动先预览并等待批准。Figure 与依赖模型的文献库链路在当前 `main` 上仍属实验功能，见[进度记录](docs/progress.md)。
 
+**当前开发状态（2026-09-27）：** 插件内的官网页面可见，但最新测试的开发包未能识别官网现有输入框。带自动文献信息的发送和选区提交因此受阻。下方演示来自较早的开发包；[真实宿主结果](docs/progress.md)记录了这一限制。已发布的 v0.1.1 是另一份产物。
+
 ## 演示
 
-Silver 等人（2016）的 *[Mastering the game of Go with deep neural networks and tree search](https://doi.org/10.1038/nature16961)*，在隔离的文献库中操作。每个 GIF 都是当前 `main` 版本真实窗口截图的剪辑，不是连续录屏。
+Silver 等人（2016）的 *[Mastering the game of Go with deep neural networks and tree search](https://doi.org/10.1038/nature16961)*，在隔离的文献库中操作。每个 GIF 都是较早开发包的真实窗口截图剪辑，不是连续录屏。
 
 **Chat——就选中的原文提问。** 选中原文后点击 **More details**，在 ChatGPT 官网页面获得回答。
 

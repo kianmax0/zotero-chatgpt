@@ -172,7 +172,9 @@ it('owns the automatic-PDF-text opt-out in the native pane without writing the w
   await ready;
   const toggle = find<HTMLInputElement>('[data-zchatgpt-pref="automatic-pdf-text"]');
   expect(toggle.checked).toBe(true);
-  expect(toggle.closest('label')?.textContent).toMatch(/Use current paper context automatically/u);
+  expect(toggle.closest('label')?.textContent).toMatch(/Use current paper context automatically in Reader/u);
+  expect(find('[data-zchatgpt-pref="automatic-pdf-text-help"]').textContent)
+    .toBe('On send, Reader Chat adds available paper details and abstract; Reader Agent prepares PDF text. Library Chat uses a separate context switch.');
   // The checkbox writes the same pref the reader re-checks at every request boundary.
   toggle.checked = false; change(toggle);
   expect(writeAutomaticPdfText).toHaveBeenCalledWith(false);
@@ -444,7 +446,9 @@ it('renders the pane copy in the stored UI language and never translates identif
   expect(find('[data-zchatgpt-pref="models-note"]').textContent).toBe('勾选的模型会在 Agent 请求中提供；右侧确切 id 就是实际发送的 id。来源：随包目录，并非你账户的实时权限。');
   expect(label('uiLanguage')).toBe('界面语言');
   expect(label('textScale')).toBe('Agent 文字大小（0.5–3）');
-  expect(label('automatic-pdf-text')).toBe('自动使用当前文献信息上下文');
+  expect(label('automatic-pdf-text')).toBe('在 Reader 中自动使用当前文献上下文');
+  expect(find('[data-zchatgpt-pref="automatic-pdf-text-help"]').textContent)
+    .toBe('发送时，Reader Chat 会附带可用的书目信息与摘要；Reader Agent 会准备 PDF 文本。文库 Chat 使用独立的上下文开关。');
   expect(label('preference-background')).toBe('Agent 指令');
   // The withdrawn builtin rows are simply absent; the owner's own workflows still render.
   expect(root.querySelector('[data-zchatgpt-skill="builtin-read"]')).toBeNull();

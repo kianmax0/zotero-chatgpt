@@ -1,6 +1,7 @@
 import type { ActionTaskRecord, ActionTasks } from '../../../contracts/src/tasks.ts';
 import type { RuntimeSnapshot } from '../../../contracts/src/runtime.ts';
 import { mountTaskView } from '../chat/task-view.ts';
+import { mountUILocale, type UILanguage } from '../chat/ui-locale.ts';
 import { clone as copy } from '../../../contracts/src/clone.ts';
 
 const XHTML = 'http://www.w3.org/1999/xhtml';
@@ -35,6 +36,7 @@ export interface LibraryAgentWorkbenchOptions {
   searchMentions(query: string): Promise<LibraryMentionOption[]>;
   getTasks(): Promise<ActionTasks>;
   startLogin(onSnapshot: (snapshot: RuntimeSnapshot) => void): Promise<() => void>;
+  readLanguage?(): Promise<UILanguage>;
   readAutomaticContext?(): boolean;
   toggleAutomaticContext?(): boolean;
   openSelectedPdf?(): Promise<void>;
@@ -103,10 +105,11 @@ export function mountLibraryAgentWorkbench(options: LibraryAgentWorkbenchOptions
     .zchatgpt-library-history button { display:block; width:100%; min-height:28px; height:auto; padding:6px 8px; border:0; border-radius:5px; color:inherit; background:transparent; text-align:start; white-space:normal; overflow-wrap:anywhere; cursor:pointer; }
     .zchatgpt-library-history button:hover { background:var(--fill-quinary,ButtonFace); }
     .zchatgpt-library-workbench-scroll { position:relative; flex:1; min-height:0; overflow:auto; padding:12px; }
-    .zchatgpt-library-empty { min-height:100%; display:flex; justify-content:center; align-items:center; }
-    .zchatgpt-library-workbench .zchatgpt-agent-empty-card { max-width:320px; }
-    .zchatgpt-library-workbench .zchatgpt-library-start { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:6px; }
-    .zchatgpt-library-workbench .zchatgpt-agent-empty-action { display:flex !important; align-items:center !important; flex-shrink:0; box-sizing:border-box; min-height:32px !important; height:auto !important; margin:0; padding:6px 8px !important; line-height:1.25 !important; }
+    .zchatgpt-library-empty { min-height:100%; display:flex; justify-content:center; align-items:flex-start; padding:clamp(24px,12vh,80px) 4px 16px; box-sizing:border-box; }
+    .zchatgpt-library-workbench .zchatgpt-agent-empty-card { max-width:320px; gap:6px; }
+    .zchatgpt-library-workbench .zchatgpt-library-start { display:flex; flex-direction:column; gap:2px; margin-top:10px; }
+    .zchatgpt-library-workbench .zchatgpt-agent-empty-action { display:flex !important; align-items:center !important; justify-content:space-between; flex-shrink:0; box-sizing:border-box; min-height:36px !important; height:auto !important; margin:0; padding:7px 8px !important; border:0; border-radius:6px; line-height:1.25 !important; }
+    .zchatgpt-library-workbench .zchatgpt-agent-empty-action::after { content:'›'; color:var(--fill-secondary,GrayText); font-size:18px; line-height:1; }
     .zchatgpt-library-workbench .zchatgpt-agent-empty-action-title { display:block; white-space:normal; line-height:1.3; }
     .zchatgpt-library-line { display:flex; flex-direction:column; margin:0 0 12px; }
     .zchatgpt-library-line[data-state=running] { opacity:.7; }
@@ -129,11 +132,16 @@ export function mountLibraryAgentWorkbench(options: LibraryAgentWorkbenchOptions
     .zchatgpt-library-command-menu [role=option] > span, .zchatgpt-library-command-menu [role=option] > small { display:block; line-height:1.3; white-space:normal; }
     .zchatgpt-library-command-menu small { color:var(--fill-secondary,GrayText); }
     @media (max-width:1100px) { .zchatgpt-library-workbench .zchatgpt-chrome { gap:2px; padding-inline:5px; } .zchatgpt-library-workbench .zchatgpt-shell-title { display:none; } .zchatgpt-library-header-icon { width:24px; height:26px; padding:3px; } }
+    #zotero-pane.zchatgpt-library-dock-open.zchatgpt-library-stacked #zotero-items-pane { flex-direction:column !important; }
+    #zotero-pane.zchatgpt-library-dock-open.zchatgpt-library-stacked #zotero-items-tree { width:100% !important; min-height:140px !important; flex:1 1 0 !important; }
+    #zotero-pane.zchatgpt-library-dock-open.zchatgpt-library-stacked .zchatgpt-library-resizer { flex:0 0 6px !important; width:100% !important; min-width:0 !important; max-width:none !important; height:6px !important; min-height:6px !important; max-height:6px !important; cursor:ns-resize; }
+    #zotero-pane.zchatgpt-library-dock-open.zchatgpt-library-stacked .zchatgpt-library-workbench:not(.zchatgpt-library-workbench-floating) { width:100% !important; flex:0 0 var(--zchatgpt-library-height,55%) !important; height:var(--zchatgpt-library-height,55%) !important; border-inline-start:0; border-block-start:1px solid var(--zchatgpt-border,GrayText); }
     @media (max-width:1150px) {
-      #zotero-pane.zchatgpt-library-dock-open #zotero-items-pane { flex-direction:column !important; }
-      #zotero-pane.zchatgpt-library-dock-open #zotero-items-tree { width:100% !important; min-height:140px !important; flex:1 1 0 !important; }
-      .zchatgpt-library-resizer { flex:0 0 6px !important; width:100% !important; min-width:0 !important; max-width:none !important; height:6px !important; min-height:6px !important; max-height:6px !important; cursor:ns-resize; }
-      .zchatgpt-library-workbench:not(.zchatgpt-library-workbench-floating) { width:100% !important; flex:0 0 var(--zchatgpt-library-height,55%) !important; height:var(--zchatgpt-library-height,55%) !important; border-inline-start:0; border-block-start:1px solid var(--zchatgpt-border,GrayText); }
+      /* The outer window is only a fallback when this Zotero build cannot measure the item list. */
+      #zotero-pane.zchatgpt-library-dock-open:not([data-zchatgpt-layout-measured]) #zotero-items-pane { flex-direction:column !important; }
+      #zotero-pane.zchatgpt-library-dock-open:not([data-zchatgpt-layout-measured]) #zotero-items-tree { width:100% !important; min-height:140px !important; flex:1 1 0 !important; }
+      #zotero-pane.zchatgpt-library-dock-open:not([data-zchatgpt-layout-measured]) .zchatgpt-library-resizer { flex:0 0 6px !important; width:100% !important; min-width:0 !important; max-width:none !important; height:6px !important; min-height:6px !important; max-height:6px !important; cursor:ns-resize; }
+      #zotero-pane.zchatgpt-library-dock-open:not([data-zchatgpt-layout-measured]) .zchatgpt-library-workbench:not(.zchatgpt-library-workbench-floating) { width:100% !important; flex:0 0 var(--zchatgpt-library-height,55%) !important; height:var(--zchatgpt-library-height,55%) !important; border-inline-start:0; border-block-start:1px solid var(--zchatgpt-border,GrayText); }
     }
   `;
   (doc.head ?? doc.documentElement).append(style);
@@ -161,24 +169,24 @@ export function mountLibraryAgentWorkbench(options: LibraryAgentWorkbenchOptions
   };
   const automatic = headerIcon('Automatic article context', 'M9.5 5.5h1.75c.41 0 .75.34.75.75v6.5c0 .41-.34.75-.75.75h-6.5a.75.75 0 0 1-.75-.75v-6.5c0-.41.34-.75.75-.75H6.5M9.5 5.5v-.75c0-.41-.34-.75-.75-.75h-1.5a.75.75 0 0 0-.75.75v.75M6 8.25h4M6 10.5h4');
   const pdf = headerIcon('Open selected article PDF', 'M9.25 2.5H6.25A1.25 1.25 0 0 0 5 3.75v8.5c0 .69.56 1.25 1.25 1.25h5.5c.69 0 1.25-.56 1.25-1.25V6.75ZM9.25 2.5v3.5c0 .41.34.75.75.75h3M7 11h4');
-  const history = headerIcon('Library Agent history', 'M8 2.75a5.25 5.25 0 1 1 0 10.5 5.25 5.25 0 0 1 0-10.5ZM8 5.25V8.2l2.15 1.25'); history.setAttribute('aria-expanded', 'false');
+  const history = headerIcon('Jump to Agent message', 'M3 4h10M3 8h10M3 12h10'); history.setAttribute('aria-expanded', 'false');
   headerActions.append(automatic, pdf, history, account); header.append(modeSwitch, title, headerActions);
-  const historyPanel = create('div'); historyPanel.className = 'zchatgpt-library-history'; historyPanel.setAttribute('role', 'dialog'); historyPanel.setAttribute('aria-label', 'Library Agent history'); historyPanel.hidden = true;
+  const historyPanel = create('div'); historyPanel.className = 'zchatgpt-library-history'; historyPanel.setAttribute('role', 'dialog'); historyPanel.setAttribute('aria-label', 'Jump to Agent message'); historyPanel.hidden = true;
   const accountStatus = create('p'); accountStatus.setAttribute('role', 'status'); accountStatus.dataset.zchatgptCodexLoginStatus = '';
   accountStatus.style.cssText = 'margin:0;padding:5px 12px;color:var(--fill-secondary,GrayText);font-size:11px;border-bottom:1px solid var(--zchatgpt-border,GrayText)'; accountStatus.hidden = true;
   const scroll = create('div'); scroll.className = 'zchatgpt-library-workbench-scroll';
   const lines = create('div'); lines.dataset.zchatgptLibraryMessages = ''; lines.setAttribute('aria-live', 'polite');
   const emptyWrap = create('div'); emptyWrap.className = 'zchatgpt-library-empty';
   const emptyCard = create('div'); emptyCard.className = 'zchatgpt-agent-empty-card';
+  const emptyTitle = create('strong', 'Work with your library'); emptyTitle.className = 'zchatgpt-agent-empty-title';
+  const emptyBody = create('p', 'Ask Agent, or start with a common task.'); emptyBody.className = 'zchatgpt-agent-empty-body';
   const starters = create('div'); starters.className = 'zchatgpt-agent-empty-actions zchatgpt-library-start';
   const starterItems: Array<{ label: string; prompt: string; skill: string }> = [
     { label: 'Find papers', prompt: 'Find recent open-access papers on ', skill: 'discover' },
-    { label: 'Organize', prompt: 'Add useful tags and existing collection memberships to the selected papers.', skill: 'organize' },
-    { label: 'Fill metadata', prompt: 'Fill missing metadata for the selected articles from their verified DOI.', skill: 'metadata' },
-    { label: 'Write note', prompt: 'Write a short abstract-based summary note for the selected article.', skill: 'note' },
+    { label: 'Organize selection', prompt: 'Add useful tags and existing collection memberships to the selected papers.', skill: 'organize' },
   ];
   for (const item of starterItems) {
-    const action = create('div'); action.className = 'zchatgpt-agent-empty-action'; action.setAttribute('role', 'button'); action.tabIndex = 0;
+    const action = create('button'); action.type = 'button'; action.className = 'zchatgpt-agent-empty-action';
     const name = create('span', item.label); name.className = 'zchatgpt-agent-empty-action-title';
     action.append(name);
     const choose = () => {
@@ -186,10 +194,10 @@ export function mountLibraryAgentWorkbench(options: LibraryAgentWorkbenchOptions
       question.value = item.prompt; question.focus(); question.setSelectionRange(question.value.length, question.value.length);
       renderContext(); render(current);
     };
-    action.addEventListener('click', choose); keyboardActivate(action, choose);
+    action.addEventListener('click', choose);
     starters.append(action);
   }
-  emptyCard.append(starters); emptyWrap.append(emptyCard);
+  emptyCard.append(emptyTitle, emptyBody, starters); emptyWrap.append(emptyCard);
   const taskHeading = create('h3', 'Tasks'); taskHeading.className = 'zchatgpt-library-task-heading'; taskHeading.hidden = true;
   const taskRoot = create('div'); scroll.append(emptyWrap, lines, taskHeading, taskRoot);
   const chatHost = create('div'); chatHost.hidden = true; chatHost.style.cssText = 'flex:1;min-height:0;position:relative';
@@ -199,7 +207,7 @@ export function mountLibraryAgentWorkbench(options: LibraryAgentWorkbenchOptions
   const composer = create('div'); composer.className = 'zchatgpt-draft zchatgpt-library-draft';
   const composerCard = create('div'); composerCard.className = 'zchatgpt-composer';
   const context = create('div'); context.className = 'zchatgpt-composer-context zchatgpt-library-context'; context.dataset.zchatgptLibraryContext = '';
-  const question = create('textarea'); question.className = 'zchatgpt-input'; question.setAttribute('aria-label', 'Message Zotero Agent'); question.placeholder = 'Ask Agent…';
+  const question = create('textarea'); question.className = 'zchatgpt-input'; question.setAttribute('aria-label', 'Message Zotero Agent'); question.placeholder = 'Ask Agent…'; question.title = 'Enter to send · Shift+Enter for a new line';
   const actions = create('div'); actions.className = 'zchatgpt-composer-bar';
   const leading = create('div'); leading.className = 'zchatgpt-composer-leading';
   const trailing = create('div'); trailing.className = 'zchatgpt-composer-trailing';
@@ -211,17 +219,29 @@ export function mountLibraryAgentWorkbench(options: LibraryAgentWorkbenchOptions
   mentionsButton.append(create('span', 'Add a Zotero reference'), create('span', 'Library, collection, or article')); mentionsButton.firstElementChild!.className = 'zchatgpt-plus-row-title'; mentionsButton.lastElementChild!.className = 'zchatgpt-plus-row-description';
   toolMenu.append(mentionsButton, skillsButton);
   const model = create('select'); model.className = 'zchatgpt-picker'; model.setAttribute('aria-label', 'Agent model');
-  const send = create('button', '↑'); send.type = 'button'; send.className = 'zchatgpt-library-send'; send.dataset.zchatgptLibrarySend = ''; send.setAttribute('aria-label', 'Send to Agent');
+  const send = create('button', '↑'); send.type = 'button'; send.className = 'zchatgpt-library-send'; send.dataset.zchatgptLibrarySend = ''; send.setAttribute('aria-label', 'Send to Agent'); send.title = 'Send to Agent (Enter)';
   leading.append(plus); trailing.append(model, send); actions.append(leading, trailing); composerCard.append(context, question, actions, toolMenu); composer.append(composerCard);
   const commandMenu = create('div'); commandMenu.className = 'zchatgpt-library-command-menu'; commandMenu.setAttribute('role', 'listbox'); commandMenu.hidden = true;
   const error = create('p'); error.setAttribute('role', 'alert'); error.hidden = true; error.style.cssText = 'margin:0;padding:6px 12px;color:var(--accent-red,#c22)';
   panel.append(header, historyPanel, accountStatus, chatNotice, scroll, chatHost, commandMenu, error, composer);
   if (dock) { if (resizer) dock.append(resizer); dock.append(panel); }
   else (doc.body ?? doc.documentElement).append(panel);
+  const localizer = mountUILocale(panel);
 
+  let stacked = false;
+  const measureLayout = () => {
+    if (!dock || !page) return;
+    const width = dock.getBoundingClientRect().width;
+    if (!Number.isFinite(width) || width <= 0) return;
+    stacked = width < 700;
+    page.dataset.zchatgptLayoutMeasured = '';
+    page.classList.toggle('zchatgpt-library-stacked', stacked);
+    panel.dataset.zchatgptLayout = stacked ? 'stacked' : 'side';
+    resizer?.setAttribute('aria-orientation', stacked ? 'horizontal' : 'vertical');
+  };
   const resizePanel = (desired: number) => {
     if (!dock || !resizer) return;
-    const vertical = doc.defaultView?.getComputedStyle(dock).flexDirection === 'column';
+    const vertical = stacked;
     resizer.setAttribute('aria-orientation', vertical ? 'horizontal' : 'vertical');
     const available = vertical ? dock.getBoundingClientRect().height : dock.getBoundingClientRect().width;
     if (!Number.isFinite(available) || available < 300) return;
@@ -234,7 +254,7 @@ export function mountLibraryAgentWorkbench(options: LibraryAgentWorkbenchOptions
   let drag: { coordinate: number; size: number; pointerId: number; vertical: boolean } | null = null;
   resizer?.addEventListener('pointerdown', event => {
     if (event.button !== 0 || event.isPrimary === false) return;
-    const vertical = doc.defaultView?.getComputedStyle(dock!).flexDirection === 'column';
+    const vertical = stacked;
     const rect = panel.getBoundingClientRect();
     drag = { coordinate: vertical ? event.clientY : event.clientX, size: vertical ? rect.height : rect.width, pointerId: event.pointerId, vertical };
     resizer.setPointerCapture?.(event.pointerId); event.preventDefault();
@@ -243,7 +263,7 @@ export function mountLibraryAgentWorkbench(options: LibraryAgentWorkbenchOptions
   const finishDrag = () => { drag = null; };
   resizer?.addEventListener('pointerup', finishDrag); resizer?.addEventListener('pointercancel', finishDrag);
   resizer?.addEventListener('keydown', event => {
-    const vertical = doc.defaultView?.getComputedStyle(dock!).flexDirection === 'column';
+    const vertical = stacked;
     const grow = vertical ? event.key === 'ArrowUp' : event.key === 'ArrowLeft';
     const shrink = vertical ? event.key === 'ArrowDown' : event.key === 'ArrowRight';
     if (!grow && !shrink) return;
@@ -252,12 +272,15 @@ export function mountLibraryAgentWorkbench(options: LibraryAgentWorkbenchOptions
   });
   const onWindowResize = () => {
     if (panel.hidden || !dock || !resizer) return;
-    const vertical = doc.defaultView?.getComputedStyle(dock).flexDirection === 'column';
+    measureLayout();
+    const vertical = stacked;
     resizer.setAttribute('aria-orientation', vertical ? 'horizontal' : 'vertical');
     const saved = panel.style.getPropertyValue(vertical ? '--zchatgpt-library-height' : '--zchatgpt-library-width');
     if (saved) resizePanel(Number.parseFloat(saved));
   };
   doc.defaultView?.addEventListener('resize', onWindowResize);
+  const layoutObserver = dock && doc.defaultView?.ResizeObserver ? new doc.defaultView.ResizeObserver(onWindowResize) : null;
+  if (dock) layoutObserver?.observe(dock);
 
   let current: LibraryAgentWorkbenchState = { lines: [], busy: false, model: null, models: [] };
   let selectedSkill: LibrarySkillOption | null = null;
@@ -269,13 +292,29 @@ export function mountLibraryAgentWorkbench(options: LibraryAgentWorkbenchOptions
   let querySerial = 0; let composing = false; let busy = false; let disposed = false;
   let chosenModelId: string | null = null;
   let mode: 'agent' | 'chat' = options.showChat ? 'chat' : 'agent'; let modeGeneration = 0;
+  let languageSerial = 0;
+  const refreshLanguage = () => {
+    if (!options.readLanguage) return;
+    const serial = ++languageSerial;
+    void Promise.resolve().then(() => options.readLanguage!()).then(language => {
+      if (!disposed && serial === languageSerial) localizer.update(language);
+    }).catch(() => undefined);
+  };
+  const paintModeChrome = () => {
+    panel.setAttribute('aria-label', mode === 'chat' ? 'Zotero ChatGPT' : 'Zotero Agent');
+    automatic.hidden = mode !== 'chat';
+    history.hidden = mode !== 'agent';
+    account.hidden = mode !== 'agent';
+  };
+  paintModeChrome();
   let unsubscribe: (() => void) | undefined; let unsubscribeTasks: (() => void) | undefined; let unsubscribeLogin: (() => void) | undefined;
   let taskPort: ActionTasks | undefined;
   const selectionTree = doc.getElementById('zotero-items-tree');
   let selectionTimer: number | null = null;
+  const showOfficialChat = async (anchor: HTMLElement) => options.showChat!(anchor);
   const paintChat = (result: { title: string; contextStatus: 'bibliography-only' | 'context-disabled' | 'unbound' | 'selection-changed' }) => {
     title.textContent = result.title ? `Chat · ${result.title}` : 'ChatGPT';
-    chatNotice.textContent = result.contextStatus === 'bibliography-only' ? 'On send, ChatGPT receives available bibliography and saved abstract. No PDF body text.'
+    chatNotice.textContent = result.contextStatus === 'bibliography-only' ? 'Details and saved abstract will be added when you send. PDF text is not included.'
       : result.contextStatus === 'context-disabled' ? 'Automatic article context is off.'
         : result.contextStatus === 'selection-changed' ? 'Finish the current Chat draft before switching articles.'
           : 'Select one Zotero article to chat.';
@@ -284,7 +323,7 @@ export function mountLibraryAgentWorkbench(options: LibraryAgentWorkbenchOptions
   const refreshSelectedChat = () => {
     if (disposed || panel.hidden || mode !== 'chat' || !options.showChat) return;
     const generation = modeGeneration;
-    void options.showChat(chatHost).then(result => {
+    void showOfficialChat(chatHost).then(result => {
       if (disposed || panel.hidden || mode !== 'chat' || generation !== modeGeneration) return;
       paintChat(result); error.hidden = true;
     }).catch(caught => { if (!disposed && !panel.hidden && mode === 'chat') { error.textContent = failure(caught); error.hidden = false; } });
@@ -309,7 +348,7 @@ export function mountLibraryAgentWorkbench(options: LibraryAgentWorkbenchOptions
   const closeHistory = () => { historyPanel.hidden = true; history.setAttribute('aria-expanded', 'false'); };
   const paintHistory = () => {
     historyPanel.replaceChildren();
-    if (!current.lines.length) { historyPanel.append(create('p', 'No library Agent messages yet.')); return; }
+    if (!current.lines.length) { historyPanel.append(create('p', 'No Agent messages yet.')); return; }
     for (const line of current.lines.slice(-30).reverse()) {
       const row = create('button', `${line.role === 'user' ? 'You' : 'Agent'} · ${line.text.slice(0, 140)}`); row.type = 'button';
       row.addEventListener('click', () => {
@@ -329,8 +368,13 @@ export function mountLibraryAgentWorkbench(options: LibraryAgentWorkbenchOptions
     if (selectedSkill) chip(`/${selectedSkill.name}`, () => { selectedSkill = null; renderContext(); render(current); question.focus(); });
     for (const mention of mentions) chip(`@${mention.label}`, () => { const index = mentions.findIndex(row => row.id === mention.id); if (index >= 0) mentions.splice(index, 1); renderContext(); render(current); question.focus(); });
   };
+  const paintComposerState = (state: LibraryAgentWorkbenchState) => {
+    emptyWrap.hidden = state.lines.length > 0 || !!question.value.trim() || !!selectedSkill || mentions.length > 0;
+    send.disabled = state.busy || busy || !question.value.trim();
+  };
   const render = (state: LibraryAgentWorkbenchState) => {
-    current = copy(state); emptyWrap.hidden = state.lines.length > 0 || !!question.value.trim() || !!selectedSkill || mentions.length > 0;
+    current = copy(state);
+    paintComposerState(state);
     const previousBottom = scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight;
     lines.replaceChildren(...state.lines.map(line => {
       const node = create('article'); node.className = 'zchatgpt-message zchatgpt-library-line'; node.dataset.role = line.role === 'agent' ? 'assistant' : 'user'; node.dataset.state = line.state ?? 'completed';
@@ -344,7 +388,6 @@ export function mountLibraryAgentWorkbench(options: LibraryAgentWorkbenchOptions
     model.disabled = state.models.length < 2;
     if (chosenModelId && !state.models.some(option => option.id === chosenModelId)) chosenModelId = null;
     model.value = chosenModelId ?? state.model ?? state.models[0]?.id ?? '';
-    send.disabled = state.busy || busy || !question.value.trim();
     if (!historyPanel.hidden) paintHistory();
   };
   const renderTasks = async () => {
@@ -413,7 +456,7 @@ export function mountLibraryAgentWorkbench(options: LibraryAgentWorkbenchOptions
       .finally(() => { busy = false; if (!disposed) render(current); });
   };
   const onKeydown = (event: KeyboardEvent) => {
-    if (event.isComposing || composing) return;
+    if (event.isComposing || composing || event.keyCode === 229) return;
     if (!commandMenu.hidden && menuEntries.length) {
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
         event.preventDefault(); menuIndex = (menuIndex + (event.key === 'ArrowDown' ? 1 : -1) + menuEntries.length) % menuEntries.length;
@@ -424,7 +467,7 @@ export function mountLibraryAgentWorkbench(options: LibraryAgentWorkbenchOptions
     }
     if (event.key === 'Escape' && !commandMenu.hidden) { event.preventDefault(); closeMenu(); return; }
     if (event.key === 'Escape' && !toolMenu.hidden) { event.preventDefault(); closeToolMenu(); return; }
-    if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); onSend(); }
+    if (event.key === 'Enter' && !event.shiftKey && !event.altKey) { event.preventDefault(); onSend(); }
   };
   const loadAgent = () => {
     void Promise.all([options.load(), options.skills(), options.getTasks()]).then(async ([state, availableSkills, tasks]) => {
@@ -447,13 +490,15 @@ export function mountLibraryAgentWorkbench(options: LibraryAgentWorkbenchOptions
   };
   const onOpen = () => {
     panel.hidden = false;
+    refreshLanguage();
     paintAutomaticContext();
+    paintModeChrome();
     if (resizer) resizer.hidden = false;
     page?.classList.add('zchatgpt-library-dock-open'); trigger.setAttribute('aria-pressed', 'true'); trigger.setAttribute('aria-expanded', 'true');
     onWindowResize();
     if (mode === 'chat' && options.showChat) {
       chatHost.hidden = false; scroll.hidden = true; composer.hidden = true; account.hidden = true;
-      void options.showChat(chatHost).then(result => { if (!disposed && !panel.hidden && mode === 'chat') paintChat(result); })
+      void showOfficialChat(chatHost).then(result => { if (!disposed && !panel.hidden && mode === 'chat') { paintChat(result); error.hidden = true; } })
         .catch(caught => { if (!disposed && !panel.hidden) { error.textContent = failure(caught); error.hidden = false; } });
     } else { question.focus(); loadAgent(); }
   };
@@ -465,21 +510,23 @@ export function mountLibraryAgentWorkbench(options: LibraryAgentWorkbenchOptions
       error.hidden = true;
       // The official browser measures its anchor when show() runs.
       chatHost.hidden = false;
-      void options.showChat!(chatHost).then(result => {
+      void showOfficialChat(chatHost).then(result => {
         if (disposed || generation !== modeGeneration || panel.hidden) { options.hideChat?.(); return; }
         mode = 'chat'; paintChat(result);
-        scroll.hidden = true; composer.hidden = true; account.hidden = true; accountStatus.hidden = true;
+        scroll.hidden = true; composer.hidden = true; accountStatus.hidden = true;
+        paintModeChrome();
         chatMode.setAttribute('aria-pressed', 'true'); agentMode.setAttribute('aria-pressed', 'false');
       }).catch(caught => { chatHost.hidden = true; options.hideChat?.(); error.textContent = failure(caught); error.hidden = false; });
     } else {
-      options.hideChat?.(); mode = 'agent'; title.textContent = 'Zotero Agent';
-      chatHost.hidden = true; chatNotice.hidden = true; scroll.hidden = false; composer.hidden = false; account.hidden = false;
+      options.hideChat?.(); mode = 'agent'; title.textContent = 'Zotero Agent'; error.hidden = true;
+      chatHost.hidden = true; chatNotice.hidden = true; scroll.hidden = false; composer.hidden = false;
+      paintModeChrome();
       chatMode.setAttribute('aria-pressed', 'false'); agentMode.setAttribute('aria-pressed', 'true'); question.focus(); loadAgent();
     }
   };
   chatMode.setAttribute('aria-pressed', String(mode === 'chat')); agentMode.setAttribute('aria-pressed', String(mode === 'agent'));
   chatMode.addEventListener('click', () => switchMode('chat')); agentMode.addEventListener('click', () => switchMode('agent'));
-  const closeWorkbench = (restoreFocus: boolean) => { modeGeneration++; panel.hidden = true; chatNotice.hidden = true; if (resizer) resizer.hidden = true; page?.classList.remove('zchatgpt-library-dock-open'); trigger.setAttribute('aria-pressed', 'false'); trigger.setAttribute('aria-expanded', 'false'); options.hideChat?.(); closeMenu(); closeToolMenu(); closeHistory(); if (restoreFocus) trigger.focus(); };
+  const closeWorkbench = (restoreFocus: boolean) => { modeGeneration++; panel.hidden = true; chatNotice.hidden = true; if (resizer) resizer.hidden = true; page?.classList.remove('zchatgpt-library-dock-open', 'zchatgpt-library-stacked'); if (page) delete page.dataset.zchatgptLayoutMeasured; stacked = false; trigger.setAttribute('aria-pressed', 'false'); trigger.setAttribute('aria-expanded', 'false'); options.hideChat?.(); closeMenu(); closeToolMenu(); closeHistory(); if (restoreFocus) trigger.focus(); };
   const onClose = () => closeWorkbench(true);
   const onMenuOpen = () => { options.showLibraryTab?.(); if (!panel.hidden) return; onOpen(); };
   trigger.addEventListener('click', () => { if (panel.hidden) onOpen(); else onClose(); }); menuItem?.addEventListener('command', onMenuOpen); menuItem?.addEventListener('click', onMenuOpen);
@@ -496,16 +543,17 @@ export function mountLibraryAgentWorkbench(options: LibraryAgentWorkbenchOptions
   mentionsButton.addEventListener('click', () => { void showMenu('mention', '', null); question.focus(); });
   keyboardActivate(skillsButton, () => { void showMenu('skill', '', null); question.focus(); });
   keyboardActivate(mentionsButton, () => { void showMenu('mention', '', null); question.focus(); });
-  question.addEventListener('input', () => { detectTrigger(); render(current); });
+  question.addEventListener('input', () => { detectTrigger(); paintComposerState(current); });
   question.addEventListener('keydown', onKeydown); question.addEventListener('compositionstart', () => { composing = true; });
   question.addEventListener('compositionend', () => { composing = false; detectTrigger(); });
   panel.addEventListener('keydown', event => { if (event.key === 'Escape' && !historyPanel.hidden) { event.preventDefault(); closeHistory(); return; } if (event.key === 'Escape' && commandMenu.hidden && toolMenu.hidden && !event.isComposing) onClose(); });
   model.addEventListener('change', () => { chosenModelId = model.value; });
   const dispose = () => {
-    disposed = true; unsubscribe?.(); unsubscribeTasks?.(); unsubscribeLogin?.(); taskView?.dispose();
+    disposed = true; languageSerial++; localizer.dispose(); unsubscribe?.(); unsubscribeTasks?.(); unsubscribeLogin?.(); taskView?.dispose();
     if (selectionTimer !== null) doc.defaultView?.clearTimeout(selectionTimer);
     selectionObserver?.disconnect(); selectionTree?.removeEventListener('click', scheduleSelectedChat, true); selectionTree?.removeEventListener('keyup', scheduleSelectedChat, true);
     doc.defaultView?.removeEventListener('resize', onWindowResize);
+    layoutObserver?.disconnect();
     page?.classList.remove('zchatgpt-library-dock-open');
     trigger.remove(); menuItem?.remove(); sharedStyles?.remove(); style.remove(); resizer?.remove(); panel.remove();
   };

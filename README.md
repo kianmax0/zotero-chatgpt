@@ -11,9 +11,11 @@
 
 Chat opens by default and never starts a Codex request. Agent writes stay inside the requested paper or collection: verified highlights from an explicit request apply automatically, everything else is previewed for approval. Figure and model-backed library flows on `main` are experimental ([progress](docs/progress.md)).
 
+**Current development status (September 27, 2026):** The embedded official page is visible, but its current editor is not recognized by the guarded bridge. Automatic paper context and selected-passage submission are blocked in the latest tested development build. The demos below came from an earlier build; see [the exact host result](docs/progress.md). The published v0.1.1 asset is a separate build.
+
 ## Demo
 
-Silver et al. (2016), *[Mastering the game of Go with deep neural networks and tree search](https://doi.org/10.1038/nature16961)*, in an isolated library. Edited sequences of real window screenshots from `main`, not continuous recordings.
+Silver et al. (2016), *[Mastering the game of Go with deep neural networks and tree search](https://doi.org/10.1038/nature16961)*, in an isolated library. Edited sequences of real window screenshots from an earlier development build, not continuous recordings.
 
 **Chat — ask about a passage.** Select text, choose **More details**, read the answer in the official ChatGPT page.
 

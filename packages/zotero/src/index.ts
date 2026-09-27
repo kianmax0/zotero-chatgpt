@@ -577,7 +577,8 @@ export function startup(options: PluginContext): void {
     }
     active = false;
     if (notifierID) Zotero.Notifier.unregisterObserver(notifierID); notifierID = undefined;
-    preferencePanes?.remove(); preferencePanes = undefined;
+    // Keep the registrar available for shutdown to await any registration still in flight.
+    void preferencePanes?.remove().catch(error => Zotero.logError(error));
     if (paneID) Zotero.ItemPaneManager.unregisterSection(paneID); paneID = '';
     const bridge = preferencesBridge();
     try { delete bridge.ZoteroChatGPTPreferencesHost; delete bridge.ZoteroChatGPTPreferencesPane; } catch { /* startup is already failing */ }
@@ -660,6 +661,7 @@ export function onMainWindowLoad(window: Window): void {
       skills: async () => (await orchestrator()).skills(),
       searchMentions: async query => (await orchestrator()).searchMentions(query),
       getTasks: () => services.getTasks(),
+      readLanguage: async () => (await (await services.getWorkspace()).settings()).uiLanguage,
       showChat: anchor => {
         for (const surface of chatSurfaces.get(win)?.values() ?? []) surface.hide();
         const result = libraryChat.show(anchor);
@@ -770,7 +772,9 @@ export async function shutdown(): Promise<void> {
   }
   for (const current of readers.values()) { for (const button of current.buttons) button.remove(); current.pane.dispose(); current.bar.dispose(); }
   readers.clear();
-  preferencePanes?.remove(); preferencePanes = undefined;
+  // Zotero may resolve register() after disable begins. Finish its cleanup before bootstrap
+  // shutdown returns, so the next enable cannot reuse the fixed pane id too early.
+  await preferencePanes?.remove(); preferencePanes = undefined;
   const bridge = preferencesBridge();
   try { delete bridge.ZoteroChatGPTPreferencesHost; delete bridge.ZoteroChatGPTPreferencesPane; }
   catch (error) { Zotero.logError(error); }

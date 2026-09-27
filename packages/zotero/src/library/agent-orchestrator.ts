@@ -235,7 +235,10 @@ export function createLibraryAgentOrchestrator(options: LibraryAgentOrchestrator
         if (!items.length) throw new ReaderError('INVALID_REQUEST', 'Select or @mention at least one Zotero paper to organize.');
         if (intent.candidates.some(candidate => candidate.itemIndex >= items.length || candidate.collectionIndexes.some(index => index >= safeCollections.length)))
           throw new ReaderError('INVALID_REQUEST', 'The Agent referred to an item or collection outside the frozen selection.');
-        await options.tasks.planOrganization({ conversationId: options.sessionId, question, selection: items, collections: safeCollections, proposals: intent.candidates });
+        // Collection names are model-facing labels in the frozen request. The task controller only
+        // accepts native target identities, so strip display metadata at this trust boundary.
+        const organizationCollections = safeCollections.map(({ clientId, libraryId, collectionKey }) => ({ clientId, libraryId, collectionKey }));
+        await options.tasks.planOrganization({ conversationId: options.sessionId, question, selection: items, collections: organizationCollections, proposals: intent.candidates });
         display = `Prepared ${intent.candidates.length} selected item${intent.candidates.length === 1 ? '' : 's'} for one review. Existing tags and memberships remain unchanged until approval.`;
       } else if (intent.kind === 'metadata') {
         const selection = indexes(items, intent.itemIndexes);

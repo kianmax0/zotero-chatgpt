@@ -404,10 +404,10 @@ it('keeps a login-only official page interactive while saved conversation restor
   surface.destroy();
 });
 
-it('fails closed when the official page has an unknown editor and opens only recognized or login-only pages', async () => {
+it('keeps an actor-guarded page clickable when its composer is unknown, while bridge commands remain unavailable', async () => {
   const { win, doc } = chromeWindow();
   let status = 'unsupported-composer';
-  const browserActor = { sendQuery: () => Promise.resolve({ status }) };
+  const browserActor = { sendQuery: vi.fn((name: string) => Promise.resolve({ status: name === 'probe' ? status : 'blocked', reason: 'composer-missing' })) };
   const surface = createChatEmbedSurface(win);
   const browser = doc.querySelector(`[${CHAT_EMBED_ATTR}]`) as unknown as HTMLElement & {
     currentURI: { spec: string };
@@ -416,10 +416,24 @@ it('fails closed when the official page has an unknown editor and opens only rec
   browser.currentURI = { spec: CHAT_APP_URL };
   browser.browsingContext = { currentWindowGlobal: { getActor: () => browserActor } };
   const { slot, frame } = sidebar(doc);
+  const host = doc.createElement('section'); host.dataset.zchatgptEmbed = '';
+  const notice = doc.createElement('span'); notice.dataset.zchatgptBridgeStatusLine = ''; notice.hidden = true;
+  host.append(notice, slot); doc.documentElement.append(host);
   surface.show(slot, frame);
   await new Promise(resolve => setTimeout(resolve, 0));
-  expect(browser.style.pointerEvents).toBe('none');
+  expect(browser.style.pointerEvents).toBe('auto');
   expect(browser.getAttribute('data-zchatgpt-bridge-ready')).toBe('unsupported-composer');
+  expect(notice.hidden).toBe(false);
+  expect(notice.textContent).toContain('editor is not recognized');
+  await expect(surface.stage('synthetic selection')).resolves.toEqual({ status: 'blocked', reason: 'composer-missing' });
+  expect(browserActor.sendQuery).toHaveBeenCalledWith('stage', { text: 'synthetic selection' });
+
+  const Event = (doc.defaultView as unknown as { CustomEvent: typeof CustomEvent }).CustomEvent;
+  browser.dispatchEvent(new Event(OFFICIAL_CHAT_BRIDGE_EVENT, {
+    detail: { kind: 'readiness', binding: browser.getAttribute('data-zchatgpt-embed-binding'), status: 'unsupported-send' },
+  }));
+  expect(browser.style.pointerEvents).toBe('auto');
+  expect(browser.getAttribute('data-zchatgpt-bridge-ready')).toBe('unsupported-send');
 
   status = 'ready';
   browser.browsingContext.currentWindowGlobal = { getActor: () => browserActor };

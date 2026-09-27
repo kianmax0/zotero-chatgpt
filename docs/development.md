@@ -1,7 +1,7 @@
 # zotero-chatgpt：开发、测试与发行
 
-> 文档类型：操作与验证规则。修订日期：2026-09-20。
-> 命令、脚本参数、CI 与产物校验已对照当前 `package.json`、`scripts/`、`runtime/` 和 `.github/workflows/` 核验。2026-09-20 的发布前整备轮实际运行了离线门禁、打包、产物校验与**无模型**宿主阶段；没有运行真实 ChatGPT/Codex、真实模型轮次或原生动作验收。§6 的截图级 UI 宿主检查仍是后续开发要求。
+> 文档类型：操作与验证规则。修订日期：2026-09-27。
+> 命令、脚本参数、CI 与产物校验已对照当前 `package.json`、`scripts/`、`runtime/` 和 `.github/workflows/` 核验。2026-09-20 的发布前整备轮实际运行了离线门禁、打包、产物校验与**无模型**宿主阶段；没有运行真实 ChatGPT/Codex、真实模型轮次或原生动作验收。§6 的视觉与交互宿主检查仍是后续开发要求。
 
 产品行为见 [zotero-chatgpt-user-flow.md](zotero-chatgpt-user-flow.md)，模块契约见 [module-design.md](module-design.md)，实际结果见 [progress.md](progress.md)。本文件不保存逐版本测试流水，也不提供长期、无条件的真实文献库操作授权。
 
@@ -91,12 +91,13 @@ prepare 脚本生成的 `driverSourceHash` 必须与本次工作树匹配，避�
 | 准备命令 | 范围与副作用 |
 | --- | --- |
 | `node scripts/prepare-host-test.mjs --context --run-id <id>` | 主窗口无 PDF 的 Agent 入口、本地 PDF、dock、模式、会话、上下文、偏好和安全边界；默认不发模型请求 |
-| `node scripts/prepare-host-test.mjs --context --native --run-id <id>` | 工作树原生适配器和合成条目/PDF；写入并撤销合成标注、标签、集合；不调用模型 |
+| `node scripts/prepare-host-test.mjs --context --native --run-id <id>` | 工作树原生适配器和合成条目/PDF；写入并撤销合成标注、标签、集合；另以固定公开主题访问 OpenAlex、以固定公开 DOI 预览/批准/读回元数据和 OA PDF。只写专用测试文库，不调用模型；需要网络 |
 | `node scripts/prepare-host-test.mjs --context --live` | context 合成 PDF 上调用已登录 Codex，会使用实际额度；不接受 `--run-id` |
 | `node scripts/prepare-host-test.mjs --context --live --live-core-flows --login-wait-seconds <0..3600>` | 操作者完成官方 Agent 登录后，验证真实模型高亮候选经定位后自动原生写入、整理候选经 review/批准后写入，以及读回和冲突撤销 |
 | `node scripts/prepare-host-test.mjs --live-core --reuse-run-id <既有专用run-id> --report-id <新报告id> --login-wait-seconds <0..3600>` | 在已登录的专用 `context-runs/<run-id>` profile 上跑两轮 Sol/Luna 模型验收；要求实例已关闭、安装的 XPI 与传入文件 SHA 完全相同，保留该 profile 的设置和认证文件，报告名不得覆盖已有报告 |
-| `node scripts/prepare-host-test.mjs --embed` | 官方 browser/actor 比较探测；不自动登录，不采集认证和回答正文 |
-| `node scripts/prepare-host-test.mjs --embed --web-live` | 官方页面 actor 的真实可见提交链路；不能与 URL/watch/comparison probe 参数合用 |
+| `node scripts/prepare-host-test.mjs --embed` | 官方 browser/actor 比较探测；不自动登录，不采集认证和回答正文；默认跳过会改动系统共享剪贴板的复制检查 |
+| `node scripts/prepare-host-test.mjs --embed --web-live` | 官方页面 actor 的真实可见提交链路；不能与 URL/watch/comparison probe 参数合用；默认不操作共享剪贴板 |
+| `node scripts/prepare-host-test.mjs --embed --clipboard-probe` | 显式测试复制文献信息/PDF 文件，会覆盖 macOS 全局剪贴板；不得用于不打扰用户的后台验收，仅在用户为该操作留出独立时段时运行 |
 | `node scripts/prepare-host-test.mjs --embed --watch-seconds <n>` | 比较探测后保留人工观察窗口；只记录白名单网络/console/surface 状态 |
 | `node scripts/prepare-host-test.mjs --live-model` | 读取 Agent 实际模型目录，不发送问题 |
 | `node scripts/prepare-host-test.mjs --context --acceptance --run-id <id>` | 无自动 driver 的人工试用 |
@@ -105,17 +106,19 @@ prepare 脚本生成的 `driverSourceHash` 必须与本次工作树匹配，避�
 
 参数组合由 `scripts/host-test-stage.mjs` 校验：`--native` 不与 `--live` / `--acceptance` 合用；`--live-core-flows` 必须与 `--context --live` 同用；`--reuse-run-id` 只用于明确的 live core 验收并要求独立 `--report-id`；登录等待只用于声明的阶段；主阶段互斥。
 
-`--native` 的候选是合成输入，只能证明 native API、账本和撤销。`--live-core-flows` 才能提供真实模型候选证据；只有完整报告满足断言才可声明该轮端到端通过，不能用局部 PASS 掩盖 fixture/driver FAIL。
+`--native` 的标注和整理候选是合成输入，只能证明 native API、账本和撤销；固定公开 DOI 获取虽会实际联网并读回 PDF，仍不能证明已安装 XPI 的模型/UI 路由。主题发现与该 DOI 是独立场景，不能把两段拼成“搜索结果一键保存”。`--live-core-flows` 才能提供真实模型候选证据；只有完整报告满足断言才可声明该轮端到端通过，不能用局部 PASS 掩盖 fixture/driver FAIL。
 
 Agent 真实模型验收优先选当前运行时报告的 GPT-6 Sol，Sol 不可用时可选 Luna；两者都不可用则记 BLOCKED，不自动用 Astra 消耗更高成本。报告需记录实际请求模型 ID。文献库整理的独立 Agent turn 也需核对冻结选择、模型候选、任务预览和原生读回；只看到 main-window 面板或任务卡片不足以算通过。
 
 `--embed` 页面可见、actor 注册或单测通过不能证明真实 Chat 提交。必须在同一隔离 profile 完成官方登录，并在真实回答中验证随机合成 PDF 内容。trusted scheme、about:blank、CSP、Cloudflare 或站点 DOM 阻断时保留实际失败/阻塞，不关闭安全机制。
 
-上述命令不能自动被解释为已经覆盖 acquire 的“元数据 + PDF 附件”完整链路。文献获取需检查当前仓库是否已有对应测试；缺失时在任务范围内补充。仅 DOI translator 预览不算 PDF 下载通过。
+`--native` 当前含固定公开 DOI 的“预览 → 批准 → 元数据和 PDF 附件读回”检查，但不覆盖模型从主题发现结果选择并通过已安装 XPI 界面保存。仅 DOI translator 预览不算 PDF 下载通过；逐项查看报告中的发现、元数据与 PDF 状态，外部 OA 不可用时不能合并成 PASS。
 
 自动 driver 结束后先退出该实例，再准备人工 acceptance。禁止 driver、CUA 和人工同时竞争操作同一窗口。
 
 ## 6. UI 宿主验收
+
+按[产品设计原则](zotero-chatgpt-user-flow.md#设计原则简洁清晰以交互为准)检查完整操作，不以静态截图代替交互：辨认每个状态的主要动作，操作次要入口，观察悬停、按下、焦点、加载、空白、禁用、错误与恢复；检查过渡是否帮助理解且尊重减少动态效果设置。记录文献、PDF 或对话是否始终处于视觉中心，以及窄窗和放大字号下是否仍能发现必要状态。
 
 采用相同窗口尺寸、相同附件和明确产物版本记录切换前后状态。截图用合成资料，记录实际侧栏宽度、缩放和字号；不能从用户上传截图反推当时安装的 XPI。
 
@@ -132,6 +135,8 @@ Agent 真实模型验收优先选当前运行时报告的 GPT-6 Sol，Sol 不可
 | UI-07 | 主界面历史与数据管理分工；删除范围清楚 | 本地绑定/会话删除行为及活动任务保护检查 |
 
 同时检查深浅主题、长标题、放大字号、键盘导航、禁用原因、菜单关闭后焦点返回、输入框遮挡与横向溢出。无内容时不显示悬空假按钮；发生失败后不能永远锁住发送。
+
+文库场景分别检查有无选中文献、列表实际宽窄变化、Chat/Agent 工具是否随模式显示、消息跳转是否只在当前对话生效。Reader 和文库原生输入分别检查 Enter、Shift+Enter 与中文 IME；核对设置中的 Reader 自动上下文和文库 Chat 独立开关各自影响的发送范围。
 
 这些 UI 检查多数不需要真实模型。只有页面接受、真实回复或模型生成任务等特定边界才请求服务，不能为测试布局反复消耗 Codex 额度。
 

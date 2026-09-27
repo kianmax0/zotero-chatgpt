@@ -66,6 +66,7 @@ async function mountReadyChat(options: {
   closeDock?: () => void;
   contextBudget?: (input: SendInput, conversation: Conversation) => ContextBudget;
   rateLimits?: RuntimeSnapshot['rateLimits'];
+  chatUnavailableReason?: string | null;
   deleteConversation?: ReaderClient['deleteConversation'];
   identity?: PaperIdentity;
 } = {}) {
@@ -160,7 +161,7 @@ async function mountReadyChat(options: {
     subscribe: listener => { onEvent = listener; return () => undefined; }, close: async () => {},
   };
   const presenter = new ConversationPresenter(presenterContext(paperA, 'Synthetic Paper A', options.identity), {
-    client: () => Promise.resolve(client), ensureAgent: () => Promise.resolve(), chatUnavailableReason: () => null, openAuthorization: () => undefined,
+    client: () => Promise.resolve(client), ensureAgent: () => Promise.resolve(), chatUnavailableReason: () => options.chatUnavailableReason ?? null, openAuthorization: () => undefined,
     uuid: options.uuid ?? (() => '9a1c3e5f-7b2d-4c6e-8f0a-1b3d5f7a9c0e'), now: () => 'now',
     ...(options.document ? { document: options.document } : {}),
     ...(options.clipboardImages ? { readClipboardImage: options.clipboardImages } : {}),
@@ -307,11 +308,11 @@ function nextSendSummary(root: HTMLElement): string {
   return root.querySelector<HTMLElement>('[data-zchatgpt-context-summary]')?.textContent ?? '';
 }
 
-it('keeps the common header to one row and moves the context summary into the details', async () => {
+it('keeps the common header compact and moves the context summary into the details', async () => {
   const { root } = await mountReadyChat();
   const chrome = root.querySelector<HTMLElement>('[data-zchatgpt-shell-bar]')!;
-  // One toolbar row, and no permanent second row: the old context line, its empty wrapper and the
-  // legacy action strip are gone from the default structure, not merely collapsed.
+  // One toolbar component; the old context line and legacy action strip are gone from the default
+  // structure. CSS may reflow the same toolbar into a second row in a narrow Reader dock.
   expect(root.querySelectorAll('[data-zchatgpt-shell-bar]')).toHaveLength(1);
   expect(root.querySelector('[data-zchatgpt-shell-context]')).toBeNull();
   expect(root.querySelector('[data-zchatgpt-document-status]')).toBeNull();
@@ -322,6 +323,17 @@ it('keeps the common header to one row and moves the context summary into the de
   for (const action of ['mode-chat', 'mode-agent', 'new-conversation', 'history', 'more-actions']) {
     expect(chrome.querySelector(`[data-zchatgpt-action="${action}"]`), action).not.toBeNull();
   }
+  const paperActions = chrome.querySelector<HTMLElement>('[data-zchatgpt-paper-actions]')!;
+  expect(paperActions.querySelector('[data-zchatgpt-action="copy-paper-context"]')?.getAttribute('aria-label')).toBe('Copy paper context');
+  expect(paperActions.querySelector('[data-zchatgpt-action="copy-pdf-file"]')?.getAttribute('aria-label')).toBe('Copy PDF file');
+  expect(paperActions.querySelectorAll('button')).toHaveLength(2);
+});
+
+it('keeps Chat unavailable guidance within Chat and does not suggest changing modes', async () => {
+  const { root } = await mountReadyChat({ chatUnavailableReason: 'Chat transport is unavailable.' });
+  const status = root.querySelector<HTMLElement>('.zchatgpt-status-line')!;
+  expect(status.textContent).toBe('Chat is unavailable in this build. Update the plugin when official ChatGPT support is available.');
+  expect(status.textContent).not.toMatch(/Agent mode|switch modes/iu);
 });
 
 it('shows PDF page coverage for Agent after the local read completes', async () => {

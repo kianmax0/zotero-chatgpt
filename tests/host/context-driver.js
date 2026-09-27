@@ -50,6 +50,13 @@ async function runHostSmoke(config) {
         && libraryAgentPanel.querySelector('[data-zchatgpt-library-chat-notice]')?.textContent?.includes('Select one Zotero article')
         && libraryAgentPanel.querySelector('.zchatgpt-library-draft')?.hidden === true,
       { mode: libraryAgentPanel.querySelector('[data-zchatgpt-library-mode="chat"]')?.getAttribute('aria-pressed'), notice: libraryAgentPanel.querySelector('[data-zchatgpt-library-chat-notice]')?.textContent });
+    const chatHeader = {
+      context: libraryAgentPanel.querySelector('[aria-label="Automatic article context"]')?.hidden === false,
+      pdf: libraryAgentPanel.querySelector('[aria-label="Open selected article PDF"]')?.hidden === false,
+      messageJump: libraryAgentPanel.querySelector('[aria-label="Jump to Agent message"]')?.hidden === true,
+      agentLogin: libraryAgentPanel.querySelector('[data-zchatgpt-codex-login]')?.hidden === true,
+    };
+    await check('library-chat-header-shows-only-chat-relevant-actions', Object.values(chatHeader).every(Boolean), chatHeader);
     const toolbarBox = win.document.getElementById('zotero-toolbar-item-tree')?.getBoundingClientRect();
     const listBox = win.document.getElementById('zotero-items-tree')?.getBoundingClientRect();
     const agentBox = libraryAgentPanel.getBoundingClientRect();
@@ -62,6 +69,12 @@ async function runHostSmoke(config) {
     const aligned = listBox && (stacked ? agentBox.top >= listBox.bottom - 2 && agentBox.top - listBox.bottom <= 12 && Math.abs(agentBox.left - listBox.left) <= 2
       : agentBox.left >= listBox.right - 2 && agentBox.left - listBox.right <= 12);
     await check('library-agent-docks-below-toolbar-beside-items', Boolean(toolbarBox && listBox && detailsBox && resizerBox && agentBox.top >= toolbarBox.bottom - 2 && aligned && detailsBox.left >= agentBox.right - 2 && listBox.width > 0 && detailsBox.width > 0 && dockGeometry.detailsDisplay !== 'none' && dockGeometry.panelParent === 'zotero-items-pane'), dockGeometry);
+    const itemDock = win.document.getElementById('zotero-items-pane');
+    const itemDockWidth = itemDock?.getBoundingClientRect().width ?? 0;
+    const expectedLibraryLayout = itemDockWidth < 700 ? 'stacked' : 'side';
+    await until(() => libraryAgentPanel.dataset.zchatgptLayout === expectedLibraryLayout, 'library-layout-measured');
+    await check('library-layout-follows-item-list-width', itemDockWidth > 0 && libraryAgentPanel.dataset.zchatgptLayout === expectedLibraryLayout
+      && stacked === (expectedLibraryLayout === 'stacked'), { itemDockWidth: Math.round(itemDockWidth), layout: libraryAgentPanel.dataset.zchatgptLayout, stacked });
     const dockResizer = win.document.querySelector('[aria-label="Resize Zotero ChatGPT sidebar"]');
     const beforeResize = stacked ? libraryAgentPanel.getBoundingClientRect().height : libraryAgentPanel.getBoundingClientRect().width;
     dockResizer?.dispatchEvent(new win.KeyboardEvent('keydown', { key: stacked ? 'ArrowUp' : 'ArrowLeft', bubbles: true, cancelable: true }));
@@ -376,6 +389,49 @@ async function runHostSmoke(config) {
         && (modeShape.paperActions.length === 0
           || (modeShape.paperActions.length === 2 && modeShape.paperActions.includes('copy-paper-context') && modeShape.paperActions.includes('copy-pdf-file'))),
       modeShape);
+    const readerDock = shell()?.closest('.zchatgpt-dock');
+    const previousDockWidth = readerDock?.style.getPropertyValue('width') ?? '';
+    const previousDockWidthPriority = readerDock?.style.getPropertyPriority('width') ?? '';
+    const previousDockBasis = readerDock?.style.getPropertyValue('flex-basis') ?? '';
+    const previousDockBasisPriority = readerDock?.style.getPropertyPriority('flex-basis') ?? '';
+    let narrowToolbar = null;
+    if (readerDock) {
+      try {
+        // The product pins width and flex-basis inline; the temporary test size follows that same
+        // mechanism without persisting a new reader preference or changing the PDF zoom.
+        readerDock.style.setProperty('width', '320px', 'important');
+        readerDock.style.setProperty('flex-basis', '320px', 'important');
+        await delay(100);
+        const chrome = shell().querySelector('[data-zchatgpt-shell-bar]');
+        const actions = chrome?.querySelector('.zchatgpt-chrome-actions');
+        const moreButton = chrome?.querySelector('[data-zchatgpt-action="more-actions"]');
+        click(moreButton);
+        const moreMenu = shell().querySelector('[data-zchatgpt-more-menu]');
+        narrowToolbar = {
+          shellWidth: Math.round(shell().getBoundingClientRect().width),
+          chromeBottom: chrome?.getBoundingClientRect().bottom ?? 0,
+          modeBottom: modeSwitch().getBoundingClientRect().bottom,
+          actionsTop: actions?.getBoundingClientRect().top ?? 0,
+          actionsRight: actions?.getBoundingClientRect().right ?? 0,
+          shellRight: shell().getBoundingClientRect().right,
+          moreTop: moreMenu?.getBoundingClientRect().top ?? 0,
+          moreVisible: moreMenu?.hidden === false,
+          buttonWidths: [...(chrome?.querySelectorAll('.zchatgpt-chrome-actions button:not([hidden])') ?? [])].map(button => Math.round(button.getBoundingClientRect().width)),
+        };
+        click(moreButton);
+      } finally {
+        if (previousDockWidth) readerDock.style.setProperty('width', previousDockWidth, previousDockWidthPriority);
+        else readerDock.style.removeProperty('width');
+        if (previousDockBasis) readerDock.style.setProperty('flex-basis', previousDockBasis, previousDockBasisPriority);
+        else readerDock.style.removeProperty('flex-basis');
+      }
+    }
+    await check('narrow-reader-toolbar-keeps-actions-and-popover-reachable', Boolean(narrowToolbar
+      && narrowToolbar.shellWidth <= 320
+      && narrowToolbar.actionsTop >= narrowToolbar.modeBottom - 2
+      && narrowToolbar.actionsRight <= narrowToolbar.shellRight + 2
+      && narrowToolbar.moreVisible && narrowToolbar.moreTop >= narrowToolbar.chromeBottom - 2
+      && narrowToolbar.buttonWidths.every(width => width >= 30)), narrowToolbar ?? {});
     // --- Chat is not an Agent path, observed on the real dock ---
     // There is no supported Chat transport in this build, so Chat mode must state that itself rather
     // than borrow the Agent sign-in line, and it must not render Agent-only chrome (sign-in, retry).
@@ -385,7 +441,7 @@ async function runHostSmoke(config) {
     const authButton = action => panel()?.querySelector(`[data-zchatgpt-action="${action}"]`);
     const timingRow = () => panel()?.querySelector('[data-zchatgpt-request-timing]');
     const timingText = () => timingRow()?.querySelector('[data-zchatgpt-request-timing-text]')?.textContent ?? '';
-    const CHAT_UNAVAILABLE_COPY = ['Chat is unavailable in this build. Use Agent mode.', '此版本未集成 Chat 通道，请使用 Agent 模式。'];
+    const CHAT_UNAVAILABLE_COPY = ['Chat is unavailable in this build. Update the plugin when official ChatGPT support is available.', '此版本暂不可用。官方 ChatGPT 支持上线后，请更新插件。'];
     // The shared client resolves asynchronously, so Chat's own status is observed after the panel has
     // settled on its runtime, not at the instant the input appears. The observed state and the panel's
     // own alert are recorded either way: a failure here must name what the dock actually showed.
@@ -632,9 +688,19 @@ async function runHostSmoke(config) {
       await until(() => panel()?.querySelectorAll('[data-zchatgpt-draft-citations] [data-zchatgpt-citation]').length === 1, 'draft-citation-from-ask', 15000);
       await until(() => contextSource() && !contextSource().hidden && /\bp\.\s*\S+/u.test(contextSource().textContent || ''), 'context-source-follows-the-cited-page', 15000);
       await check('context-source-points-at-the-selected-page', !contextSource().hidden && /\bp\.\s*\S+/u.test(contextSource().textContent || '') && Boolean(contextSource().querySelector('[data-zchatgpt-action="open-citation"]')), { source: contextSource().textContent });
+      // The source lives under More → Paper & context details. Open that path as a reader would;
+      // clicking a hidden DOM button does not establish that the visible control works.
+      click(shell().querySelector('[data-zchatgpt-more]'));
+      await until(() => shell().querySelector('[data-zchatgpt-more-menu]')?.hidden === false, 'more-menu-open-for-source');
+      click(shell().querySelector('[data-zchatgpt-action="open-paper-details"]'));
+      const sourcePanel = contextSource().closest('[data-zchatgpt-context-panel]');
+      await until(() => sourcePanel?.hidden === false && contextSource()?.hidden === false, 'paper-details-open-for-source');
+      const sourceButton = contextSource().querySelector('[data-zchatgpt-action="open-citation"]');
+      await check('context-source-control-visible-in-paper-details', Boolean(sourceButton && sourcePanel?.hidden === false && sourceButton.getClientRects().length > 0),
+        { panelOpen: sourcePanel?.hidden === false, sourceShown: contextSource()?.hidden === false, buttonRectCount: sourceButton?.getClientRects().length ?? 0 });
       pdfViewer().currentPageNumber = 1; await until(() => pdfViewer().currentPageNumber === 1, 'reset-viewer-to-page-1');
       const navigationSource = contextSource().textContent;
-      click(contextSource().querySelector('[data-zchatgpt-action="open-citation"]'));
+      click(sourceButton);
       const navigated = await until(() => pdfViewer().currentPageNumber === 2, 'source-navigation-to-cited-page', 20000).catch(() => null);
       if (!navigated) {
         // Report what the owner would see instead of navigating, so a product failure is not mistaken
@@ -644,6 +710,8 @@ async function runHostSmoke(config) {
       } else {
         await check('context-source-returns-to-the-cited-page', pdfViewer().currentPageNumber === 2, { pageNumber: pdfViewer().currentPageNumber, locationPage: pdfViewer()._location?.pageNumber });
       }
+      click(shell().querySelector('[data-zchatgpt-action="close-context-panel"]'));
+      await until(() => sourcePanel.hidden === true, 'paper-details-closed-after-source');
     } else {
       await skip('context-source-points-at-the-selected-page', 'No synthetic text selection could be simulated in the real reader view.');
       await skip('context-source-returns-to-the-cited-page', 'No synthetic text selection could be simulated in the real reader view.');
@@ -1038,16 +1106,35 @@ async function runHostSmoke(config) {
     const loggedErrors = [];
     const originalLogError = Zotero.logError;
     Zotero.logError = error => { loggedErrors.push(String((error && error.message) || error)); };
+    const paneCount = () => panePanes()?.length ?? null;
+    const reenable = { beforeDisable: paneCount(), afterDisable: null, afterEnable: null, finalPaneCount: null, countChanges: [] };
     try {
       await subjectAddon.disable();
       await until(() => (panePanes()?.length ?? -1) === 0, 'pref-pane-absent-while-disabled');
+      reenable.afterDisable = paneCount();
       await subjectAddon.enable();
-      await until(() => panePanes()?.length === 1, 'pref-pane-single-after-reenable', 30000);
+      reenable.afterEnable = paneCount();
+      const startedReenable = Date.now();
+      let lastCount;
+      await until(() => {
+        const count = paneCount();
+        if (count !== lastCount && reenable.countChanges.length < 16) reenable.countChanges.push({ ms: Date.now() - startedReenable, count });
+        lastCount = count;
+        return count === 1;
+      }, 'pref-pane-single-after-reenable', 30000);
+    } catch (error) {
+      reenable.finalPaneCount = paneCount();
+      report.preferencesPane.reenable = { ...reenable, addonActive: subjectAddon.isActive, addonUserDisabled: subjectAddon.userDisabled,
+        preferencePaneErrorCount: loggedErrors.filter(text => /preferences pane|prefpane|zchatgpt-prefpane/i.test(text)).length, loggedErrorCount: loggedErrors.length };
+      await save();
+      throw error;
     } finally { Zotero.logError = originalLogError; }
+    reenable.finalPaneCount = paneCount();
+    report.preferencesPane.reenable = reenable;
     const paneErrors = loggedErrors.filter(text => /preferences pane|prefpane|zchatgpt-prefpane/i.test(text));
     await check('pref-pane-no-duplicates-across-disable-enable',
       panePanes()?.length === 1 && paneErrors.length === 0,
-      { panesAfterReenable: panePanes()?.length ?? null, paneCountAfterStartup: identity.paneCount, preferencePaneErrors: paneErrors, loggedErrorCount: loggedErrors.length });
+      { panesAfterReenable: panePanes()?.length ?? null, paneCountAfterStartup: identity.paneCount, preferencePaneErrorCount: paneErrors.length, loggedErrorCount: loggedErrors.length });
 
     report.status = 'passed'; report.finishedAt = new Date().toISOString(); await save();
   } catch (error) { report.status = 'failed'; report.failedStep = step; report.failure = { message: String((error && error.message) || error), stack: String((error && error.stack) || '').split('\n').slice(0, 6) }; report.finishedAt = new Date().toISOString(); await save(); Zotero.logError(error); }

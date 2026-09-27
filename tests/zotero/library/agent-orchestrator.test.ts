@@ -1,9 +1,11 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 import type { ModelOption, RuntimeSnapshot, StoragePort } from '../../../packages/contracts/src/runtime.ts';
-import type { NativeOrganizationItemSnapshot } from '../../../packages/contracts/src/native.ts';
+import type { NativeActionPort, NativeOrganizationItemSnapshot } from '../../../packages/contracts/src/native.ts';
 import { createLibraryAgentOrchestrator } from '../../../packages/zotero/src/library/agent-orchestrator.ts';
 import type { LibraryMentionItemSnapshot } from '../../../packages/zotero/src/library/mentions.ts';
 import { attachLibraryAgentDisplayText, sendLibraryAgentMessage } from '../../../packages/core/src/library/session.ts';
+import { ActionTaskController } from '../../../packages/core/src/tasks/controller.ts';
+import { MemoryStorage } from '../../core/doubles.ts';
 
 vi.mock('../../../packages/core/src/library/session.ts', () => ({
   getLibraryAgentSession: vi.fn(() => Promise.resolve({ messages: [] })),
@@ -23,7 +25,7 @@ const item: NativeOrganizationItemSnapshot = {
 };
 
 beforeEach(() => { vi.clearAllMocks(); });
-function fixture(selection: NativeOrganizationItemSnapshot[] = [], workspaceSkills: Array<{ id: string; name: string; description: string; markdown: string; enabled: boolean; workflow: string; unsupportedDependencies: string[] }> = []) {
+function fixture(selection: NativeOrganizationItemSnapshot[] = [], workspaceSkills: Array<{ id: string; name: string; description: string; markdown: string; enabled: boolean; workflow: string; unsupportedDependencies: string[] }> = [], taskPort?: unknown, availableCollections: Array<typeof collection> = [collection]) {
   const files = new Map<string, Uint8Array>();
   const storage: StoragePort = {
     read: name => Promise.resolve(files.get(name) ?? null), writeAtomic: (name, bytes) => { files.set(name, bytes); return Promise.resolve(); },
@@ -48,9 +50,9 @@ function fixture(selection: NativeOrganizationItemSnapshot[] = [], workspaceSkil
   };
   const orchestrator = createLibraryAgentOrchestrator({
     sessionId, clientId: 'client', cwd: '/private/tmp/library-agent', uuid: () => '123e4567-e89b-42d3-a456-426614174002',
-    storage, tasks: tasks as never, workspace: { settings: workspaceSettings } as never,
+    storage, tasks: (taskPort ?? tasks) as never, workspace: { settings: workspaceSettings } as never,
     mentions: mentionResolver, discovery, reader: { inspectOrganizationItem: () => Promise.resolve(item) },
-    selectedItems, collections: () => Promise.resolve([collection]), ensureAgent: () => Promise.resolve(), runtime: () => runtime,
+    selectedItems, collections: () => Promise.resolve(availableCollections), ensureAgent: () => Promise.resolve(), runtime: () => runtime,
     connection: () => ({ request: vi.fn(), onFailure: () => () => {} }),
   });
   return { orchestrator, tasks, discovery, selectedItems, workspaceSettings, mentionResolver, files };
@@ -78,6 +80,27 @@ it('plans selected-item organization and source-grounded note as distinct review
   reply({ kind: 'note', notes: [{ itemIndex: 0, text: 'Short explanation.' }] });
   await f.orchestrator.send({ question: 'Add a note', skillId: 'note', mentions: [{ id: mentionId, kind: 'collection', label: 'Methods' }], modelId: null });
   expect(f.tasks.planChildNotes).toHaveBeenCalledWith({ conversationId: sessionId, question: 'Add a note', proposals: [{ parent: item, body: 'Short explanation.' }] });
+  f.orchestrator.dispose();
+});
+
+it('creates a review with the strict task controller when host collection targets include display labels', async () => {
+  let sequence = 0;
+  const controller = new ActionTaskController(new MemoryStorage(), {} as NativeActionPort, {
+    uuid: () => `organization-${++sequence}`,
+    key: () => `ORG${String(++sequence).padStart(5, '0')}`,
+    now: () => `2026-09-27T10:00:${String(sequence).padStart(2, '0')}.000Z`,
+  });
+  const strictClientId = '123e4567-e89b-42d3-a456-426614174009';
+  const strictItem = { ...item, clientId: strictClientId };
+  const strictCollection = { ...collection, clientId: strictClientId };
+  const f = fixture([strictItem], [], controller, [strictCollection]);
+  reply({ kind: 'organize', candidates: [{ itemIndex: 0, tags: ['predictive coding'], collectionIndexes: [0] }] });
+
+  await f.orchestrator.send({ question: 'Tag the selected paper and add it to Methods', skillId: 'organize', mentions: [], modelId: null });
+
+  const tasks = await controller.list(sessionId);
+  expect(tasks).toHaveLength(1);
+  expect(tasks[0]).toMatchObject({ kind: 'organization', state: 'review', items: [{ proposal: { tags: ['predictive coding'], collections: [{ collectionKey: 'COLLECT1' }] } }] });
   f.orchestrator.dispose();
 });
 

@@ -82,6 +82,7 @@ export function selectHostStage(argv) {
   if (loginWaitSeconds !== undefined && !liveCoreFlows && !liveCoreStage) throw new Error('--login-wait-seconds requires --live-core-flows or --live-core');
   if (webLive && (selected.length !== 1 || selected[0] !== 'embed')) throw new Error('--web-live requires --embed');
   if (webLive && ['--watch-seconds', '--surface-probes', '--capability-probe', '--url'].some(flag => argv.includes(flag))) throw new Error('--web-live cannot be combined with URL, watch, or comparison probes');
+  if (argv.includes('--clipboard-probe') && (selected.length !== 1 || selected[0] !== 'embed')) throw new Error('--clipboard-probe requires --embed');
   if (recoverOrganization) {
     const conversationId = readOption(argv, '--recover-organization'); const requestId = readOption(argv, '--request-id'); const token = readOption(argv, '--expected-token'); const originVersion = readOption(argv, '--origin-version');
     if (!conversationId || !UUID.test(conversationId)) throw new Error('--recover-organization requires a valid conversation UUID');

@@ -214,11 +214,14 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
     // PDF text holds the automatic-PDF-text opt-out. It is a plugin preference, not a workspace
     // field: the pane reads and writes `extensions.zchatgpt.automaticPdfText` directly so it is the
     // single source of truth for every reader, including an already-open sidebar.
-    const automaticPdfLabel = element(doc, 'label', 'Use current paper context automatically');
+    const automaticPdfLabel = element(doc, 'label', 'Use current paper context automatically in Reader');
     const automaticPdfText = element(doc, 'input');
     automaticPdfText.type = 'checkbox'; automaticPdfText.dataset.zchatgptPref = 'automatic-pdf-text';
     automaticPdfLabel.append(automaticPdfText);
-    general.append(automaticPdfLabel);
+    const automaticPdfHelp = element(doc, 'p', 'On send, Reader Chat adds available paper details and abstract; Reader Agent prepares PDF text. Library Chat uses a separate context switch.');
+    automaticPdfHelp.className = 'zchatgpt-preferences-muted';
+    automaticPdfHelp.dataset.zchatgptPref = 'automatic-pdf-text-help';
+    general.append(automaticPdfLabel, automaticPdfHelp);
 
     // Chat's account and model controls live on the official website, so this pane only renders
     // actual plugin settings. Agent groups its model allowlist, instructions and installed skills.

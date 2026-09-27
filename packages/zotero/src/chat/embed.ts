@@ -176,9 +176,8 @@ export function createChatEmbedSurface(win: Window, url: string = CHAT_APP_URL):
   const surfaceBinding = win.crypto.randomUUID();
   browser.setAttribute(CHAT_EMBED_BINDING_ATTR, surfaceBinding);
   browser.style.cssText = 'display:block;width:100%;height:100%;border:0;';
-  // Fail closed until the actor confirms the current WindowGlobal has the supported official
-  // composer. A login-only page (no editor at all) is opened after the probe; an unknown editor stays
-  // gated so selector drift cannot send an unaugmented question.
+  // Keep the page gated until its actor answers. Once the actor is present, unsupported bridge
+  // commands and recognized send intents are blocked without disabling every website control.
   browser.style.pointerEvents = 'none';
   // The browser hangs off an HTML div rather than the window root: the main window is a XUL document,
   // and an HTML div is the box whose geometry CSS actually controls there — the host probe loads the
@@ -355,13 +354,14 @@ export function createChatEmbedSurface(win: Window, url: string = CHAT_APP_URL):
       const status = typeof result?.status === 'string' ? result.status : 'actor-unavailable';
       bridgeIdle = !pendingRestore && ['ready', 'composer-ready', 'composer-missing'].includes(status);
       if (bridgeIdle) activeMarker = null;
-      // A page with no composer may expose only sign-in or challenge controls. Those ordinary page
-      // controls stay clickable while the pending-restore guards below keep PDF/send commands off.
-      const interactive = status === 'composer-missing'
+      // A loading/login page can have no composer or an unknown editor. The actor blocks all
+      // outside clicks while an unknown editor holds a draft; an empty page remains usable.
+      const interactive = status === 'composer-missing' || status === 'unsupported-composer'
         || (!pendingRestore && ['ready', 'composer-ready', 'draft', 'busy', 'generating'].includes(status));
       browser.style.pointerEvents = interactive ? 'auto' : 'none';
       browser.setAttribute('data-zchatgpt-bridge-ready', status);
       if (status === 'composer-missing') announce('Sign in to official ChatGPT. Automatic paper context will be included only after its supported composer is available.');
+      else if (status === 'unsupported-composer') announce('Automatic paper context is unavailable because the ChatGPT editor is not recognized. Clear its draft before using other page controls.');
       else if (!interactive) announce('Automatic paper context is blocked because this ChatGPT page does not expose the supported composer. No question can be sent from this surface.');
       bridgeProbeAfter = Date.now() + (status === 'ready' ? 5000 : 2000);
     } finally {
@@ -424,7 +424,9 @@ export function createChatEmbedSurface(win: Window, url: string = CHAT_APP_URL):
         browser.setAttribute('data-zchatgpt-bridge-ready', pendingRestore ? 'restoring' : 'draft');
       } else if (status === 'unsupported-send') {
         bridgeIdle = false;
-        browser.style.pointerEvents = 'none';
+        // The actor already cancelled this send. Keep the page available for login, navigation and
+        // draft edits; the next unsupported send remains blocked by the same capture handler.
+        browser.style.pointerEvents = 'auto';
         browser.setAttribute('data-zchatgpt-bridge-ready', 'unsupported-send');
         announce('Automatic paper context is blocked because the official ChatGPT send control is unsupported. Your draft was kept and was not sent.');
       }

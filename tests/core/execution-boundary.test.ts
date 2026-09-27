@@ -93,7 +93,8 @@ describe('Chat never enters the Codex Agent runtime', () => {
     // that reason before it is hashed, recorded or routed, so it cannot silently become a Codex turn.
     const failure: unknown = await c.send(request(1, { question: 'hello' })).catch((error: unknown) => error);
     expect((failure as { code?: string }).code).toBe('UNSUPPORTED_INTERACTION');
-    expect((failure as Error).message).toContain('chat transport');
+    expect((failure as Error).message).toContain('official ChatGPT support');
+    expect((failure as Error).message).not.toContain('Agent mode');
     await flush();
     expect(agentEntries(p)).toEqual([]);
     // Nothing reached the conversation controller: the trace the controller writes is empty.

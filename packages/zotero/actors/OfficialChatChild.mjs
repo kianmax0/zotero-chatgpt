@@ -61,12 +61,16 @@ function sendButton(document, composer = findChatGPTComposer(document)) {
   return button?.localName === 'button' ? button : null;
 }
 
+function hasExplicitSendSemantics(control) {
+  if (!control) return false;
+  const label = String(control.getAttribute?.('aria-label') || '').trim().toLowerCase();
+  return Boolean(control.matches?.(SEND_SELECTOR)) || ['send', 'send message', 'send prompt'].includes(label);
+}
+
 function hasSubmissionSemantics(button) {
   if (!button || button.localName !== 'button') return false;
   const type = String(button.type || button.getAttribute?.('type') || '').toLowerCase();
-  if (type === 'submit' || button.matches?.(SEND_SELECTOR)) return true;
-  const label = String(button.getAttribute?.('aria-label') || '').trim().toLowerCase();
-  return ['send', 'send message', 'send prompt'].includes(label);
+  return type === 'submit' || hasExplicitSendSemantics(button);
 }
 
 function safeStructure(document) {
@@ -99,16 +103,19 @@ export class ZoteroChatGPTOfficialChatChild extends JSWindowActorChild {
     if (this.replaying || !isChatGPTDocument(this.document)) return;
     const composer = findChatGPTComposer(this.document);
     if (!composer) {
-      const unknown = this.document.querySelector('textarea, [contenteditable="true"]');
-      if (!unknown) return;
-      const form = unknown.closest?.('form');
-      const clicked = event.target?.closest?.('button');
+      const unknownEditors = [...this.document.querySelectorAll('textarea, [contenteditable="true"]')];
+      if (!unknownEditors.length) return;
+      // We cannot know which control an unknown editor uses to send. While it holds a draft,
+      // consume every outside click, including unlabeled and localized controls. The owner can
+      // still edit/clear the draft, and ordinary page controls work again once it is empty.
+      const withinEditor = target => unknownEditors.some(editor => inside(target, editor));
+      const hasDraft = unknownEditors.some(editor => Boolean((editor.localName === 'textarea' ? editor.value : editor.textContent)?.trim()));
       const unknownSubmit = event.isTrusted && (
-        (event.type === 'keydown' && event.key === 'Enter' && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey && !event.isComposing && inside(event.target, unknown))
-        || (event.type === 'click' && hasSubmissionSemantics(clicked) && Boolean(form?.contains(clicked)))
-        || (event.type === 'submit' && inside(unknown, event.target))
+        (event.type === 'keydown' && event.key === 'Enter' && !event.isComposing && event.keyCode !== 229 && withinEditor(event.target))
+        || (event.type === 'click' && hasDraft && (!withinEditor(event.target) || Boolean(event.target?.closest?.('button, [role="button"]'))))
+        || (event.type === 'submit' && unknownEditors.some(editor => inside(editor, event.target)))
       );
-      if (event.type === 'input' && inside(event.target, unknown)) this.sendAsyncMessage('readiness', { status: 'unsupported-send' });
+      if (event.type === 'input' && withinEditor(event.target)) this.sendAsyncMessage('readiness', { status: 'unsupported-send' });
       if (unknownSubmit) { event.preventDefault(); event.stopImmediatePropagation(); this.sendAsyncMessage('readiness', { status: 'unsupported-send' }); }
       return;
     }

@@ -213,7 +213,7 @@ const COPY = {
    * Chat mode's own status. Chat's backend is an unresolved platform boundary in this build, so the
    * line names that instead of borrowing the Agent sign-in state.
    */
-  chatUnavailable: 'Chat is unavailable in this build. Use Agent mode.',
+  chatUnavailable: 'Chat is unavailable in this build. Update the plugin when official ChatGPT support is available.',
   // Chat mode's only native chrome when the host hosts the real ChatGPT application. The application
   // owns its own conversation, transcript and model picker, so nothing of that is duplicated here;
   // the bar only carries what the web app cannot know about this host, which is the paper it has open.

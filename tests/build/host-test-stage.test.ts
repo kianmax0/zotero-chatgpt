@@ -131,6 +131,20 @@ describe('dedicated host-test stage selection', () => {
     await expect(select(['--context', '--live', '--run-id', 'clean'])).rejects.toThrow(/cannot be combined with --live/u);
   });
 
+  it('keeps shared clipboard probes off unless embed preparation explicitly opts in', async () => {
+    await expect(select(['--context', '--clipboard-probe'])).rejects.toThrow(/requires --embed/u);
+    const sandbox = await prepareScriptSandbox();
+    try {
+      const driverXpi = path.join(sandbox.root, '.zotero-chatgpt-dev/embed/profile/extensions/zchatgpt-host-test@local.xpi');
+      await execFileAsync(process.execPath, [sandbox.script, '--embed', sandbox.xpi], { cwd: sandbox.root });
+      expect(await readArchiveEntry(driverXpi, 'bootstrap.js')).toContain('"clipboardProbe":false');
+      await execFileAsync(process.execPath, [sandbox.script, '--embed', '--clipboard-probe', sandbox.xpi], { cwd: sandbox.root });
+      expect(await readArchiveEntry(driverXpi, 'bootstrap.js')).toContain('"clipboardProbe":true');
+    } finally {
+      await rm(sandbox.root, { recursive: true, force: true });
+    }
+  });
+
   it('refuses to prepare a named new context tree that already exists without changing it', async () => {
     const sandbox = await prepareScriptSandbox();
     const runRoot = path.join(sandbox.root, '.zotero-chatgpt-dev/context-runs/already-there');

@@ -162,6 +162,7 @@ body.zchatgpt-dock-open #split-view .primary-view,
   flex-direction: column;
   flex: 0 0 auto;
   min-width: 0;
+  container: zchatgpt-reader-shell / inline-size;
   --zchatgpt-shell-bar-height: 44px;
   background: var(--material-background, var(--color-background, Canvas));
   border-bottom: 1px solid var(--zchatgpt-border);
@@ -268,6 +269,28 @@ body.zchatgpt-dock-open #split-view .primary-view,
 .zchatgpt-paper-actions .zchatgpt-icon-button[aria-disabled="true"] { opacity: .45; cursor: default; }
 .zchatgpt-paper-actions .zchatgpt-icon-button[data-zchatgpt-copy-state="copied"] { color: var(--fill-primary, CanvasText); }
 .zchatgpt-paper-actions .zchatgpt-icon-button[data-zchatgpt-copy-busy="true"] { opacity: .6; }
+/* Reader docks can be narrower than the combined mode, tabs and paper actions. In that case the
+   mode stays in the first row and every action moves together to a second row. The container query
+   follows this Reader pane's width rather than the app window, and the fixed icon hit area remains. */
+@container zchatgpt-reader-shell (max-width: 320px) {
+  .zchatgpt-chrome {
+    flex-wrap: wrap;
+    align-content: center;
+    row-gap: 2px;
+    min-height: 80px;
+    --zchatgpt-shell-bar-height: 80px;
+  }
+  .zchatgpt-mode-switch { order: 0; }
+  .zchatgpt-panes, .zchatgpt-shell-title { order: 1; flex: 1 1 0; }
+  .zchatgpt-chrome-actions {
+    order: 2;
+    flex: 0 0 calc(100% - 6px);
+    justify-content: flex-end;
+    margin-inline-start: 0;
+  }
+  .zchatgpt-more-menu { top: calc(80px + 4px); }
+  .zchatgpt-rename-form { top: calc(80px + 4px); }
+}
 /* The copy answer is a short-lived pill under the bar. It is absolutely positioned, so a success or
    a failure never changes the toolbar's height or moves the controls beside it. */
 .zchatgpt-shell-feedback {
@@ -581,8 +604,8 @@ body.zchatgpt-dock-open #split-view .primary-view,
   gap: 1px;
   width: 100%;
   padding: 8px 10px;
-  border: 1px solid var(--zchatgpt-border);
-  border-radius: 8px;
+  border: 0;
+  border-radius: 6px;
   background: transparent;
   color: inherit;
   font: inherit;
@@ -591,6 +614,7 @@ body.zchatgpt-dock-open #split-view .primary-view,
   box-sizing: border-box;
 }
 .zchatgpt-agent-empty-action:hover { background: var(--fill-quinary, ButtonFace); }
+.zchatgpt-agent-empty-action:active { background: var(--fill-quaternary, ButtonFace); }
 .zchatgpt-agent-empty-action:focus-visible { outline: 2px solid var(--fill-secondary, GrayText); outline-offset: -2px; }
 .zchatgpt-agent-empty-action-title { font-size: calc(13px * var(--zchatgpt-chat-text-scale, 1)); color: var(--fill-primary, CanvasText); }
 .zchatgpt-agent-empty-action-hint { font-size: calc(11px * var(--zchatgpt-chat-text-scale, 1)); line-height: 15px; color: var(--zchatgpt-text-secondary); }

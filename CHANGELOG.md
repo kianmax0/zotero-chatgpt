@@ -55,6 +55,12 @@ focus and scroll, and the reader keeps Zotero's native dock, zoom, rotation and 
 
 ## Unreleased
 
+### Post-v0.1.1 development work (not a new release)
+
+- Refined the Reader and library Chat/Agent controls and repaired Preferences pane shutdown registration. Unknown official ChatGPT editors now block outside clicks while holding a draft, so unlabeled send controls cannot bypass paper-context preparation; empty-page controls remain usable. The latest tested embedded editor still blocks automatic paper-context submission; see `docs/progress.md`.
+- Library Agent typing now updates only composer state instead of rebuilding the transcript, model options and history on every character. A regression checks stable message DOM and empty-state/send behavior.
+- Repository housekeeping keeps only editable marketing source in Git. Rendered media and browser build state remain local; the current 48-second video source replaces the obsolete 65-second kit instructions.
+
 ### Development preview `0.4.0-alpha.1`
 
 - **A hidden sidebar surface stops working, and the no-model host check can see the redesigned header again.** A hosted Chat surface that was hidden — switching to Agent, or closing the sidebar — kept its 500 ms timer running: the window kept waking up to re-measure, probe the official page and track the conversation until that surface was evicted or the window closed. Hiding now stops the poll and showing the surface starts a fresh one, so a parked paper costs nothing. This round also removed unused exports, an unreferenced stylesheet rule, and the dead compile-time `CHAT_TRANSPORT` branch in the Zotero entry point: this build never wires a native Chat transport, so the local Chat path still refuses honestly instead of borrowing Agent's Codex runtime. The dedicated-profile, no-model host stage runs to completion again — five driver assertions still read the pre-redesign DOM (the tab strip, the active-citation line and the `+` / history controls now live in the common shell, not in the chat section) or the old copy (`New chat` where Agent now says `New agent`, and the Preferences language canary looked for `Chat` / `Appearance` where the section is now `General`), which had been aborting the stage after 18 of 47 checks. The development add-on version stays `0.4.0a34`; the same-named development artifact was rebuilt in this round, so its SHA-256 changed.

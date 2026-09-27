@@ -612,6 +612,7 @@ async function runHostSmoke(config) {
     // One synthetic attachment, opened in the real reader: the sidebar host is the reader document,
     // so the probe has to run there rather than in an arbitrary window.
     const parent = new Zotero.Item('journalArticle'); parent.setField('title', 'ZCHATGPT embedded web surface probe');
+    parent.setCreators([{ firstName: 'Ada', lastName: 'Example', creatorType: 'author' }]);
     const queue = new Zotero.Notifier.Queue(); await parent.saveTx({ notifierQueue: queue });
     const attachment = await Zotero.Attachments.importFromFile({ file: config.pdfPath, parentItemID: parent.id, title: 'Embed probe PDF', saveOptions: { notifierQueue: queue } });
     await Promise.all([parent.loadAllData(), attachment.loadAllData()]); await Zotero.Notifier.commit(queue);
@@ -872,7 +873,11 @@ async function runHostSmoke(config) {
       };
       product.actorProbe = out;
       const started = Date.now();
-      const deadline = started + 30000;
+      // The anonymous landing page can sit on a challenge interstitial for tens of seconds before
+      // the application hydrates its composer; 30 s was enough to see "missing" forever without
+      // ever observing the editor the drift report needs. 120 s distinguishes "no editor at all"
+      // from "an editor the product does not recognise".
+      const deadline = started + Math.min(120000, Math.max(1000, Number(config.probeTimeoutMs) || 120000));
       while (Date.now() < deadline) {
         try {
           const browser = embedBrowser();
@@ -885,9 +890,14 @@ async function runHostSmoke(config) {
           ]).finally(() => { if (timer !== null) clearTimeout(timer); });
           const status = result && typeof result.status === 'string' ? result.status : 'invalid-response';
           out.status = status; out.error = null;
+          // The probe's `structure` payload is the child actor's own allowlisted shape — editor
+          // tag/id/role/contenteditable and a send-button count, never page prose or field values.
+          // A selector repair is built from exactly this, so keep every non-empty observation.
+          const structure = result && typeof result.structure === 'object' && result.structure ? result.structure : null;
+          if (structure && Array.isArray(structure.editors) && structure.editors.length > 0 && !out.structure) out.structure = structure;
           out.currentURI = safeWebURL(browser.currentURI?.spec || '');
           out.contentPid = global.osPid ?? null;
-          out.timeline.push({ ms: Date.now() - started, status, currentURI: out.currentURI, contentPid: out.contentPid });
+          out.timeline.push({ ms: Date.now() - started, status, currentURI: out.currentURI, contentPid: out.contentPid, editors: structure && Array.isArray(structure.editors) ? structure.editors.length : 0, knownSendButtons: structure ? Number(structure.knownSendButtons ?? 0) : 0 });
           if (status === 'ready' || status === 'composer-ready' || status === 'draft') break;
         } catch (error) {
           out.error = message(error);
@@ -898,8 +908,16 @@ async function runHostSmoke(config) {
       }
       out.timeline = out.timeline.slice(-60);
       out.elapsedMs = Date.now() - started;
+      out.surfaceAfterProbe = describeSurface();
       return out;
     })();
+    if (['composer-missing', 'unsupported-composer'].includes(product.actorProbe.status)) {
+      const pointerEvents = product.actorProbe.surfaceAfterProbe.pointerEvents;
+      await check('product-without-supported-composer-keeps-web-page-clickable',
+        pointerEvents.inline === 'auto' && pointerEvents.computed === 'auto'
+          && product.actorProbe.surfaceAfterProbe.centerHitOwnedBrowser === true,
+        { actorStatus: product.actorProbe.status, pointerEvents, centerHitOwnedBrowser: product.actorProbe.surfaceAfterProbe.centerHitOwnedBrowser });
+    }
     const productActorReady = ['ready', 'composer-ready', 'draft'].includes(product.actorProbe.status) && product.actorProbe.error === null;
     const manualWatch = Number(config.watchSeconds || 0) > 0;
     if (config.webLive) { product.actorProbe.webLiveReadinessGate = productActorReady; await save(); }
@@ -1061,6 +1079,7 @@ async function runHostSmoke(config) {
     await save();
 
     // ---- the Zotero context routes, driven through the product's own controls ---------------------
+    if (config.clipboardProbe === true) {
     // Chat mode hosts the real application, and the application owns its own conversation: this host
     // cannot put the paper into that page. What it can do is put the paper — as text, and as the
     // actual PDF file — on the clipboard, and these checks drive the product's own controls and read
@@ -1196,8 +1215,14 @@ async function runHostSmoke(config) {
     };
     await check('product-chat-copies-the-pdf-file',
       product.fileClipboard.matchesAttachment === true &&
-      String(fileStatus || '').includes('clipboard'),
+      /\bcopied\b/iu.test(String(fileStatus || '')) && /\bpaste\b/iu.test(String(fileStatus || '')),
       product.fileClipboard);
+    } else {
+      // The system clipboard is shared with the user's other work, even when this Zotero instance
+      // is hidden or backgrounded. Keep ordinary embed/Web-live checks read-only with respect to it.
+      product.notRun.push('product-clipboard-read-path', 'clipboard-copy-paper-context', 'clipboard-copy-pdf-file');
+      await save();
+    }
 
     // Recorded, not asserted: what the application itself reached. `contentTitle` is written by the
     // page's own script, so a non-empty title is the page's own statement that its JavaScript ran;

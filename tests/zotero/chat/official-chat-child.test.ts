@@ -58,15 +58,54 @@ describe('official ChatGPT child send transaction', () => {
     }
   });
 
-  it('blocks only actual submit semantics for an unknown composer', () => {
+  it('blocks every outside click while an unknown composer holds a draft', () => {
     const current = page(); const actor = actorFor(current); current.composer.id = 'changed-site-editor'; current.composer.textContent = 'draft';
     const ordinary = current.composer.ownerDocument.createElement('button'); ordinary.type = 'button'; current.composer.closest('form')!.append(ordinary);
     const ordinaryPrevent = vi.fn(); actor.handleEvent({ type: 'click', isTrusted: true, target: ordinary, preventDefault: ordinaryPrevent, stopImmediatePropagation: vi.fn() });
-    expect(ordinaryPrevent).not.toHaveBeenCalled();
+    expect(ordinaryPrevent).toHaveBeenCalledTimes(1);
     current.send.type = 'submit';
     const preventDefault = vi.fn(); const stopImmediatePropagation = vi.fn();
     actor.handleEvent({ type: 'click', isTrusted: true, target: current.send, preventDefault, stopImmediatePropagation });
     expect(preventDefault).toHaveBeenCalledTimes(1); expect(stopImmediatePropagation).toHaveBeenCalledTimes(1);
+
+    const detachedSend = current.doc.createElement('button'); detachedSend.type = 'button';
+    detachedSend.setAttribute('aria-label', 'Send message'); current.doc.body.append(detachedSend);
+    const detachedPrevent = vi.fn(); const detachedStop = vi.fn();
+    actor.handleEvent({ type: 'click', isTrusted: true, target: detachedSend, preventDefault: detachedPrevent, stopImmediatePropagation: detachedStop });
+    expect(detachedPrevent).toHaveBeenCalledTimes(1); expect(detachedStop).toHaveBeenCalledTimes(1);
+
+    const roleSend = current.doc.createElement('div'); roleSend.setAttribute('role', 'button');
+    roleSend.setAttribute('aria-label', 'Send'); current.doc.body.append(roleSend);
+    const rolePrevent = vi.fn(); const roleStop = vi.fn();
+    actor.handleEvent({ type: 'click', isTrusted: true, target: roleSend, preventDefault: rolePrevent, stopImmediatePropagation: roleStop });
+    expect(rolePrevent).toHaveBeenCalledTimes(1); expect(roleStop).toHaveBeenCalledTimes(1);
+
+    const unlabeled = current.doc.createElement('div'); unlabeled.setAttribute('role', 'button'); current.doc.body.append(unlabeled);
+    const unlabeledPrevent = vi.fn(); const unlabeledStop = vi.fn();
+    actor.handleEvent({ type: 'click', isTrusted: true, target: unlabeled, preventDefault: unlabeledPrevent, stopImmediatePropagation: unlabeledStop });
+    expect(unlabeledPrevent).toHaveBeenCalledTimes(1); expect(unlabeledStop).toHaveBeenCalledTimes(1);
+
+    const nestedControl = current.composer.ownerDocument.createElement('span'); nestedControl.setAttribute('role', 'button'); current.composer.append(nestedControl);
+    const nestedPrevent = vi.fn();
+    actor.handleEvent({ type: 'click', isTrusted: true, target: nestedControl, preventDefault: nestedPrevent, stopImmediatePropagation: vi.fn() });
+    expect(nestedPrevent).toHaveBeenCalledTimes(1);
+
+    current.composer.textContent = '';
+    const emptyPrevent = vi.fn();
+    actor.handleEvent({ type: 'click', isTrusted: true, target: unlabeled, preventDefault: emptyPrevent, stopImmediatePropagation: vi.fn() });
+    expect(emptyPrevent).not.toHaveBeenCalled();
+  });
+
+  it('guards a second unknown editor and modified Enter keys', () => {
+    const current = page(); const actor = actorFor(current); current.composer.id = 'changed-site-editor';
+    const second = current.doc.createElement('div'); second.setAttribute('contenteditable', 'true'); second.textContent = 'draft in second editor'; current.doc.body.append(second);
+    const unlabeled = current.doc.createElement('div'); current.doc.body.append(unlabeled);
+    const clickPrevent = vi.fn();
+    actor.handleEvent({ type: 'click', isTrusted: true, target: unlabeled, preventDefault: clickPrevent, stopImmediatePropagation: vi.fn() });
+    expect(clickPrevent).toHaveBeenCalledTimes(1);
+    const keyPrevent = vi.fn();
+    actor.handleEvent({ type: 'keydown', key: 'Enter', ctrlKey: true, isTrusted: true, target: second, preventDefault: keyPrevent, stopImmediatePropagation: vi.fn() });
+    expect(keyPrevent).toHaveBeenCalledTimes(1);
   });
 
   it('intercepts the resolved mobile submit button exactly once', () => {

@@ -16,7 +16,7 @@ const COPY: Readonly<Record<string, string>> = {
   'Open the Codex sidebar to connect.': '打开 Codex 侧栏以连接。', 'Starting Codex…': '正在启动 Codex…',
   'Codex is unavailable': 'Codex 暂不可用', 'Finish signing in to ChatGPT in your browser.': '请在浏览器中完成 ChatGPT 登录。',
   'Sign in with ChatGPT to ask a question.': '使用 ChatGPT 登录后即可提问。', 'Responding…': '正在回答…',
-  'Chat is unavailable in this build. Use Agent mode.': '此版本未集成 Chat 通道，请使用 Agent 模式。',
+  'Chat is unavailable in this build. Update the plugin when official ChatGPT support is available.': '此版本暂不可用。官方 ChatGPT 支持上线后，请更新插件。',
   // Chat mode's hosted application bar. The application's own UI is not translated here; these are
   // only the controls this host adds, and what they did with the user's clipboard.
   'Reload ChatGPT': '重新加载 ChatGPT',
@@ -54,6 +54,7 @@ const COPY: Readonly<Record<string, string>> = {
   'The official ChatGPT composer is unavailable. Your draft was kept and was not sent.': '官方 ChatGPT 输入框不可用。草稿已保留，未发送。',
   'The selection was inserted in the ChatGPT draft. It has not been sent.': '选中内容已插入 ChatGPT 草稿，尚未发送。',
   'Sign in to official ChatGPT. Automatic paper context will be included only after its supported composer is available.': '请登录官方 ChatGPT。只有检测到受支持的输入框后，才会加入自动文献信息上下文。',
+  'Automatic paper context is unavailable because the ChatGPT editor is not recognized. Clear its draft before using other page controls.': '无法识别 ChatGPT 输入框，自动文献信息上下文暂不可用。先清空草稿，再使用页面上的其他控件。',
   'Automatic paper context is blocked because this ChatGPT page does not expose the supported composer. No question can be sent from this surface.': '此 ChatGPT 页面未提供受支持的输入框，自动文献信息上下文已阻止发送；此界面不会发送任何问题。',
   'Automatic paper context is blocked because the official ChatGPT send control is unsupported. Your draft was kept and was not sent.': '官方 ChatGPT 发送控件不受支持，自动文献信息上下文已阻止发送。草稿已保留，未发送。',
   'Four paper ChatGPT sessions already contain drafts or work. Finish or clear one before opening another.': '已有四个论文 ChatGPT 会话包含草稿或进行中的工作。请先完成或清空其中一个，再打开新会话。',
@@ -89,7 +90,13 @@ const COPY: Readonly<Record<string, string>> = {
   'Target collection': '目标分类', 'Choose a collection…': '选择分类…', 'Preview image': '预览图片',
   'Image preview': '图片预览', 'Close image preview': '关闭图片预览', 'Save image…': '保存图片…',
   'Move image earlier': '将图片前移',
-  'Use current paper context automatically': '自动使用当前文献信息上下文',
+  'Use current paper context automatically in Reader': '在 Reader 中自动使用当前文献上下文',
+  'On send, Reader Chat adds available paper details and abstract; Reader Agent prepares PDF text. Library Chat uses a separate context switch.': '发送时，Reader Chat 会附带可用的书目信息与摘要；Reader Agent 会准备 PDF 文本。文库 Chat 使用独立的上下文开关。',
+  'Work with your library': '处理你的文献库',
+  'Ask Agent, or start with a common task.': '向 Agent 提问，或从常用任务开始。',
+  'Find papers': '查找文献',
+  'Organize selection': '整理选中条目',
+  'Send to Agent (Enter)': '发送给 Agent（Enter）',
   'New agent': '新建 Agent 会话',
   // Context details (UI-02/UI-03). Dynamic sentences with counts are handled by `progress()`; these
   // are the fixed phrases. The one-line summary lives in the details now, not in a permanent row.

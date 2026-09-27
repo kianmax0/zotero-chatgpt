@@ -16,7 +16,7 @@ import type { ChatStreamEvent, ChatTransport } from '../../../contracts/src/exec
  * The one user-facing reason Chat cannot run in this build. Exported so the shared composer refuses
  * a Chat send with the same words the placeholder would fail with, instead of a sign-in message.
  */
-export const CHAT_TRANSPORT_UNAVAILABLE_MESSAGE = 'Chat needs a ChatGPT chat transport, which is not integrated in this build. Use Agent mode for Codex execution, or update the plugin once a supported transport ships.';
+export const CHAT_TRANSPORT_UNAVAILABLE_MESSAGE = 'Chat is unavailable in this build. Update the plugin when official ChatGPT support is available.';
 
 export function unavailableChatTransport(): ChatTransport {
   return {
