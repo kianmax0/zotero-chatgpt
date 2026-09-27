@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="360" viewBox="0 0 1500 360">
+  <text x="750" y="180" text-anchor="middle" font-family="Arial,Helvetica,sans-serif" font-size="156" font-weight="760" letter-spacing="-8">
+    <tspan fill="#B4161F">zotero-</tspan><tspan fill="#1D1D1F">chatgpt</tspan>
+  </text>
+  <text x="750" y="286" text-anchor="middle" font-family="Arial,'PingFang SC',sans-serif" font-size="54" font-weight="600" fill="#1D1D1F">Chat 读论文，Agent 动手</text>
+</svg>

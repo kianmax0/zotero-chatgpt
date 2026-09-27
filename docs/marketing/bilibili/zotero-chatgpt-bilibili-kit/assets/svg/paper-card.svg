@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="900" viewBox="0 0 720 900">
+  <defs>
+    <filter id="s" x="-30%" y="-30%" width="160%" height="170%"><feDropShadow dx="0" dy="28" stdDeviation="34" flood-color="#1D1D1F" flood-opacity="0.13"/></filter>
+  </defs>
+  <rect x="70" y="55" width="580" height="760" rx="16" fill="#FCFBF8" filter="url(#s)" transform="rotate(-7 360 435)"/>
+  <g transform="rotate(-7 360 435)" fill="#1D1D1F">
+    <text x="140" y="195" font-family="Georgia,serif" font-size="62" opacity=".72">A</text>
+    <text x="140" y="260" font-family="Georgia,serif" font-size="62" opacity=".72">Better</text>
+    <text x="140" y="325" font-family="Georgia,serif" font-size="62" opacity=".72">Research</text>
+    <text x="140" y="390" font-family="Georgia,serif" font-size="62" opacity=".72">Workflow</text>
+    <rect x="140" y="470" width="290" height="14" rx="7" opacity=".12"/>
+    <rect x="140" y="510" width="340" height="14" rx="7" opacity=".10"/>
+    <rect x="140" y="550" width="270" height="14" rx="7" opacity=".10"/>
+    <text x="140" y="700" font-family="Arial,sans-serif" font-size="22" letter-spacing="6" opacity=".42">IDEAS · PAPERS</text>
+  </g>
+</svg>

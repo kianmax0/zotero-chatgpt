@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="820" height="220" viewBox="0 0 820 220">
+  <rect x="8" y="8" width="804" height="204" rx="102" fill="#F0EEEA"/>
+  <rect x="18" y="18" width="390" height="184" rx="92" fill="#FFFFFF"/>
+  <text x="213" y="135" text-anchor="middle" font-family="Arial,sans-serif" font-size="64" font-weight="700" fill="#1D1D1F">Chat</text>
+  <text x="610" y="135" text-anchor="middle" font-family="Arial,sans-serif" font-size="64" font-weight="700" fill="#6E6E73">Agent</text>
+</svg>

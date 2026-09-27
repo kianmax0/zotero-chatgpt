@@ -23,6 +23,29 @@ credentials.json
 *.key
 id_rsa
 
+# Marketing build state, including the browser profile used by the video renderer.
+docs/marketing/bilibili/.work/
+docs/marketing/bilibili/zotero-chatgpt-bilibili-kit/remotion/out/
+docs/marketing/bilibili/zotero-chatgpt-bilibili-kit/remotion/public/audio/
+docs/marketing/bilibili/zotero-chatgpt-bilibili-kit/remotion/public/assets/
+
+# The marketing source is tracked; rendered films, screenshots, images and Word exports
+# stay on this computer. These rules also cover older drafts and duplicated public assets.
+docs/marketing/**/*.mp4
+docs/marketing/**/*.png
+docs/marketing/**/*.gif
+docs/marketing/**/*.wav
+docs/marketing/**/*.docx
+docs/media/cover.png
+docs/superpowers/
+
+# Superseded 65-second kit notes; the current film uses remotion/src/{data,theme}.
+docs/marketing/bilibili/zotero-chatgpt-bilibili-kit/brand/
+docs/marketing/bilibili/zotero-chatgpt-bilibili-kit/copy/
+docs/marketing/bilibili/zotero-chatgpt-bilibili-kit/motion/
+docs/marketing/bilibili/zotero-chatgpt-bilibili-kit/sound/
+docs/marketing/bilibili/zotero-chatgpt-bilibili-kit/storyboard/
+
 # Local editor state and TypeScript incremental build info.
 .vscode/
 .idea/

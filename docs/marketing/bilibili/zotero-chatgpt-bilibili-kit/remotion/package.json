@@ -1,0 +1,20 @@
+{
+  "name": "zotero-chatgpt-promo",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "assets": "node tools/prepare-assets.mjs",
+    "start": "npm run assets && remotion studio src/index.jsx",
+    "check:copy": "node tools/copy-check.mjs",
+    "audio": "node tools/audio.mjs",
+    "render": "npm run assets && node tools/copy-check.mjs && node tools/audio.mjs && remotion render src/index.jsx PromoVideo .work/render.mp4 --codec=h264 && node tools/mux.mjs",
+    "cover": "npm run assets && remotion still src/index.jsx PromoVideo out/cover-12s.png --frame=360 --image-format=png"
+  },
+  "dependencies": {
+    "@remotion/cli": "^4.0.0",
+    "remotion": "^4.0.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {}
+}
