@@ -4,7 +4,6 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
-import { PINNED_RUNTIME } from './runtime-assets.mjs';
 import yauzl from 'yauzl';
 
 // Exported so the real-profile development install tool (`scripts/install-dev-xpi.ts`) shares one
@@ -303,13 +302,16 @@ export async function writeBuildInfo(archivePath, outputPath) {
   const output = path.resolve(outputPath);
   assertIsolatedRoot(path.dirname(output));
   const manifest = await readManifest(local);
+  const recorded = JSON.parse((await readArchiveEntry(local, 'content/runtime/manifest.json')).toString('utf8'));
+  const runtimes = (Array.isArray(recorded) ? recorded : [recorded]).map(({ platform, architecture, codexVersion, sha256 }) => ({ platform, architecture, codexVersion, sha256 }));
   const info = {
     addonId: manifest.id,
     version: manifest.version,
     sha256: await sha256File(local),
-    platform: PINNED_RUNTIME.platform,
-    architecture: PINNED_RUNTIME.architecture,
-    codexVersion: PINNED_RUNTIME.codexVersion,
+    platform: runtimes.length === 1 ? runtimes[0].platform : 'multi',
+    architecture: runtimes.length === 1 ? runtimes[0].architecture : 'multi',
+    codexVersion: runtimes[0].codexVersion,
+    runtimes,
     source: 'local-xpi',
     updateChannel: 'none',
     githubRelease: null,

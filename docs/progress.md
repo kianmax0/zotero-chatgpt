@@ -1,9 +1,63 @@
 # zotero-chatgpt：进度与证据索引
 
-> 文档类型：证据和缺口，不是产品规格。更新日期：2026-09-27。
-> 首节记录本轮仓库收尾与最终开发包，其后保留 Chat 网页修复、用户 UI 反馈、重构验收及有引用价值的修复、测试、发行与失败历史；历史结果不自动继承到当前候选。已移除过期的“当前候选”快照和重复状态矩阵。状态只用 PASS / FAIL / BLOCKED / NOT RUN。
+> 文档类型：证据和缺口，不是产品规格。更新日期：2026-09-28。
+> 首节记录 Linux Agent 用户复测结果，其后保留运行时修复、仓库收尾与最终开发包、 Chat 网页修复、用户 UI 反馈、重构验收及有引用价值的修复、测试、发行与失败历史；历史结果不自动继承到当前候选。已移除过期的“当前候选”快照和重复状态矩阵。状态只用 PASS / FAIL / BLOCKED / NOT RUN。
 
 产品要求见 [zotero-chatgpt-user-flow.md](zotero-chatgpt-user-flow.md)，架构见 [module-design.md](module-design.md)，命令与状态定义见 [development.md](development.md)。
+
+## 2026-09-28 用户实测：Linux Agent 登录与使用
+
+用户在 Debian x86_64 / Zotero 10.0.3 上复测代理继承开发包，XPI SHA-256 为 `66b737337eac208ae05ecd1587eb95c9977d43e6eea33cf55daeb4d96104634a`。首次仍返回相同 403；只读排查确认已安装该包，但 Zotero 与 Agent 进程均没有代理环境变量。桌面手动代理设置没有自动转为进程环境，因此插件没有可继承的值。按现有桌面代理配置，通过带代理环境变量的启动脚本启动 Zotero 后，用户反馈“现在可以登陆了，并且我测试能正常工作了”。个人启动脚本只保留在本地交付目录，不纳入仓库。
+
+| 场景 | 状态 | 证据与范围 |
+| --- | --- | --- |
+| Agent 官方登录 | PASS | 用户本人手动登录并反馈成功；不是开发助手执行的自动认证测试。 |
+| Agent 基本使用 | PASS | 用户手动测试并反馈正常工作；未提供逐项操作清单，不外推为所有原生动作已验收。 |
+| 高亮、获取、整理等完整原生写入与撤销流程 | NOT RUN | 本次反馈未逐项确认这些场景。 |
+
+本次仅补充证据文档，产品代码与上述 XPI 不变；对应离线门禁及 59/59 无模型宿主结果见下一节。保留此前 403 失败记录。本轮完成自审，未进行独立审查；用户已授权本地 Git 提交，未执行 push、PR 或发布。
+
+## 2026-09-27 Agent 继承代理环境变量
+
+用户在上一轮开发包完成浏览器认证后报告 `token_exchange_failed`，服务端返回 `403 Country, region, or territory not supported`。这是实际登录 FAIL，不能以先前未登录宿主 PASS 宣称端到端已完成。源码确认 Agent 的环境白名单未传递代理变量；用户明确要求继承它们，本轮只增加这项网络配置传递，不对地区限制或实际登录结果作保证。
+
+Agent 准备时经 Gecko `Services.env.get` 读取 Zotero 进程的 `HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`、`NO_PROXY` 及各自小写形式；非空值原样传递，大小写优先级和绕过规则留给运行程序处理，重试时重新读取。保持 `environmentAppend:false` 和私有 HOME/CODEX_HOME，不继承其它变量，不记录代理地址/凭据、不写入 profile 配置。普通 Chat/路径计算不读取代理或准备 Agent。
+
+| 层级 | 状态 | 证据与范围 |
+| --- | --- | --- |
+| 修复前回归 | FAIL | 新代理继承用例 1 FAIL，旧 5 PASS，保留 `proxy-red.log`。 |
+| 类型、lint、完整单测 | PASS | `npm run typecheck`、`npm run lint`、`npm run test:unit -- --maxWorkers=1`：114 files / 1533 PASS / 1 原平台条件跳过。覆盖八个变量、大小写冲突原样保留、NO_PROXY、空值、重试读取和其他变量不继承。 |
+| 构建、产物 | PASS | `npm run package:dev`、`npm run verify:artifacts`，88 files；SHA-256 `66b737337eac208ae05ecd1587eb95c9977d43e6eea33cf55daeb4d96104634a`，208756431 bytes。 |
+| 真实 Gecko → Codex 环境传递 | PASS | `context-runs/proxy-env-20260927/proxy-inheritance-report.json`。仅向自启的全新专用 Zotero 注入八个合成代理值，按专用 profile 的可执行路径匹配 Codex，确认八项值一致、OPENAI_API_KEY/PATH/NODE_OPTIONS 不存在。只输出布尔和计数，不读取用户真实代理或认证。 |
+| 最终 XPI / Zotero 10.0.3 无模型宿主 | PASS | 同目录 `host-report.json`，59/59、模型请求 0，含 Chat 零进程/零准备与 Agent 惰性启动、Reader/文库/设置启停。 |
+| 实际代理连通、官方登录和模型问答 | NOT RUN | 本轮宿主仅使用合成代理，未验证用户实际出口，不登录、不读取认证、不请求模型。用户需在获得代理环境的 Zotero 中重新完成官方登录。地区限制错误是否解除仍待验证。 |
+
+证据保存在 `.zotero-chatgpt-dev/verification/proxy-env-20260927/`。完成 diff 自审与 `git diff --check`，未进行独立审查。未安装到日常 profile、未 commit/push/PR。此包取代上一个 Linux 测试包用于后续登录测试；保留旧包及其证据。
+
+
+## 2026-09-27 Debian Agent 随包运行时与 Zotero 10 兼容
+
+基线 `4d1c637`，分支 `fix/linux-agent-runtime`，未提交工作树。原 Chat Google 登录 PR #4 已合并，本轮独立处理 Agent。用户旧包在 Linux 报 `Unable to prepare the bundled Codex runtime`；当前上游虽有 Linux 分支，却依赖系统 CLI 并导入其他客户端认证。现在随包提供固定 0.156.1 的 Darwin arm64 与 Linux x86_64-musl 官方资产，按 Gecko OS/ABI 选择并校验，保留 Mac 缓存路径；两平台统一私有 HOME/CODEX_HOME，去除系统程序查找及凭据复制，严格核对协议版本。不会删除已有 profile 中的认证文件。
+
+本机 Zotero 已为 **10.0.3**；第一次隔离加载发现产品与 driver 的 `strict_max_version: 9.0.*` 导致 `appDisabled`。经用户明确选择，产品兼容范围改为 **9.0.6–10.0.x**，driver 跟随产品声明。平台声明不是所有组合已实测；本轮只在 Debian x86_64 / Zotero 10.0.3 验证宿主，Mac 与 Zotero 9 宿主 NOT RUN。
+
+运行资产来源与两个 SHA 见 `runtime/manifest.ts` 和 `runtime/README.md`。GitHub 官方 Linux 归档 digest 与下载内容一致；可执行文件为静态 ELF，发布 XPI 不依赖 Node。统一 XPI 包含两个目标，体积增加，但每个 profile 只提取本平台程序。Chat/Agent 登录分离与惰性连接不变。
+
+| 层级 / 场景 | 状态 | 证据与限制 |
+| --- | --- | --- |
+| 修复前回归 | FAIL | `prepare.test.ts` 新增两条用例在旧实现分别因系统 CLI 路径与错误平台校验失败；原 3 条 PASS。保留 `linux-red.log`。 |
+| 完整离线门禁 | PASS | `npm run typecheck`、`npm run lint`、`npm run test:unit -- --maxWorkers=1`：114 files / 1532 PASS / 1 平台条件跳过（Apple codesign）。未调整 timeout 或跳过失败用例。 |
+| 构建和最终 XPI | PASS | `npm run package:dev`、`npm run verify:artifacts`。`dist/zotero-chatgpt-0.1.1-dev.xpi`，208756304 bytes，88 files，SHA-256 `e538914306540eee461327834a36255baa3f4b017f816b11ba1e5e68b46f1eb2`。另逐项解压核对两个运行程序的大小和 SHA。 |
+| 真实 Linux Codex 协议 | PASS | `.zotero-chatgpt-dev/linux-protocol-20260927/report.json`：生产 prepare/client/protocol，Node child-process 适配，版本/配置校验通过，`ready`、`signedOut`、模型目录 7 项，0 模型请求。这不是 Gecko transport 的替代证据。 |
+| 候选包 Zotero 10 安装/启停 | PASS | `.zotero-chatgpt-dev/s6-virgin/host-report.json`，候选 SHA `44eee70eb38dbe90bb202e5a0259026c0a24b1b5a0e09ec31044f06dbc66fa79`：15 项 PASS、3 项 NOT RUN。专用合成库，1 个私有 Codex 进程，未登录，登录控件存在，禁用停止进程、同版本重载和本地记录保留。版本升级/回退与模型发送未执行。该候选与最终包差别是移除 core 剩余的 `system` 版本例外。 |
+| 最终包 Zotero 10 用户路径 | PASS | `.zotero-chatgpt-dev/context-runs/linux10-final-20260927/host-report.json`：最终 XPI / Zotero 10.0.3，59/59 检查通过，0 模型请求。Chat 冷启动无 Codex 进程和私有运行目录，显式 Agent 启动；覆盖文库/Reader 入口、草稿与附件隔离、侧栏尺寸、原生 PDF 上下文与设置启停。此结果不等于官网问答或真实模型验证。 |
+| 真实 Agent 登录、模型问答/原生动作 | BLOCKED | 需要用户本人通过 Agent 的独立官方登录后测试；本轮没有读取/迁移凭据、登录或调用模型，也没有安装到日常 profile。 |
+| Mac 宿主、Zotero 9 宿主、完整视觉/IME、多窗口、版本升级/回退 | NOT RUN | Mac 资产及回归仍受构建和单测校验；不能继承旧宿主 PASS。 |
+
+早期离线失败均保留：双平台 fixture 增加 Linux 资产后，包清单断言漏列新文件（已补）；一次安装测试超过原 5 秒限制（构建并行期间），后续串行门禁按原限制重跑；宿主脚本测试夹具只提供 version，补齐兼容字段后 34/34 PASS。本轮是自审，核对 diff 与产物，未进行独立审查。未 commit、push、建 PR 或发布。
+
+证据目录：`.zotero-chatgpt-dev/verification/linux-agent-20260927/`，保留 red/中间失败与 final 日志；专用宿主报告按各自 XPI 身份区分。日常文献库与认证未作为测试对象。
+
 
 ## 2026-09-27 仓库收尾与当前开发包
 

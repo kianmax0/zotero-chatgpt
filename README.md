@@ -51,7 +51,7 @@ node scripts/runtime-prepare.mjs
 npm run package:dev
 ```
 
-Install `dist/zotero-chatgpt-0.1.1-dev.xpi` the same way; it shares the v0.1.1 version label but is a newer build.
+Install `dist/zotero-chatgpt-0.1.1-dev.xpi` the same way; it shares the v0.1.1 version label but is a newer build. This development package allows Zotero 9.0.6 through 10.0.x and bundles Codex for macOS Apple Silicon and Linux x86_64. Agent uses a separate official login; no system Codex installation or imported credentials are required. See [progress](docs/progress.md) for the tested scope.
 
 ## Start using it
 

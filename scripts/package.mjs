@@ -6,7 +6,7 @@ import { createHash } from "node:crypto";
 import { builtinModules } from "node:module";
 
 import yazl from "yazl";
-import { PINNED_RUNTIME, validatePackagedRuntime } from "./runtime-assets.mjs";
+import { PINNED_RUNTIMES, validatePackagedRuntime } from "./runtime-assets.mjs";
 
 const repositoryRoot = path.resolve(import.meta.dirname, "..");
 const defaultSourceDirectory = path.join(repositoryRoot, "build/dev");
@@ -65,7 +65,7 @@ async function listFiles(directory, prefix = "") {
 }
 
 function isRuntimeFile(filePath, runtimeManifest) {
-  if (filePath.startsWith("content/runtime/")) return [runtimeManifest.entry, "content/runtime/manifest.json", ...runtimeManifest.licenses.map(name => "content/runtime/licenses/" + name)].includes(filePath);
+  if (filePath.startsWith("content/runtime/")) return ["content/runtime/manifest.json", ...(Array.isArray(runtimeManifest) ? runtimeManifest : [runtimeManifest]).flatMap(item => [item.entry, ...item.licenses.map(name => "content/runtime/licenses/" + name)])].includes(filePath);
   return (
     filePath === "bootstrap.js" ||
     filePath === "manifest.json" ||
@@ -177,7 +177,7 @@ export async function packageExtension(sourceDirectory = defaultSourceDirectory,
   requireNode24();
   await validateRequiredFiles(sourceDirectory);
   const manifest = await validateManifest(sourceDirectory);
-  const runtimeManifest = options.runtimeManifest ?? PINNED_RUNTIME;
+  const runtimeManifest = options.runtimeManifest ?? PINNED_RUNTIMES;
   await validatePackagedRuntime(sourceDirectory, runtimeManifest);
   const archivePath = requestedArchivePath ?? path.join(options.repositoryRoot ?? repositoryRoot, `dist/zotero-chatgpt-${manifest.version}-dev.xpi`);
   const sourceFiles = await listFiles(sourceDirectory);

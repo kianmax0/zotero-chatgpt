@@ -4,7 +4,7 @@ import { mkdtemp, rm, readFile, readdir, stat, writeFile, symlink } from 'node:f
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { ensureBundledRuntime, type AssetHost, type RuntimeManifest } from '../../packages/zotero/src/runtime/bundled.ts';
-import { PINNED_RUNTIME } from '../../runtime/manifest.ts';
+import { PINNED_RUNTIME, LINUX_RUNTIME, selectRuntime } from '../../runtime/manifest.ts';
 import { nodeFiles } from './files-fixture.ts';
 const roots: string[] = [];
 // Keep the pinned version from production so the manifest gate is exercised, not bypassed.
@@ -48,4 +48,32 @@ it('refuses a symlink cached executable and cleans staging after a write failure
   await rm(target); host.io.write = () => Promise.reject(new Error('write failed'));
   await expect(ensureBundledRuntime(host, 'jar:file:///x!/', root, manifest)).rejects.toThrow();
   expect((await readdir(root, { recursive: true })).some(p => p.includes('staging-'))).toBe(false);
+});
+
+it.each(['x86_64-gcc3', 'x64-gcc3', 'amd64-gcc3'])('selects the pinned Linux executable by host ABI %s', async abi => {
+  const { root, host } = await setup(); host.os = 'Linux'; host.abi = abi;
+  expect(selectRuntime(host.os, abi)).toBe(LINUX_RUNTIME);
+  // No manifest injection: production selection loads the Linux resource before rejecting tiny fixture bytes.
+  await expect(ensureBundledRuntime(host, 'jar:file:///x!/', root)).rejects.toThrow('Bundled runtime preparation failed');
+  expect(host.load).toHaveBeenCalledWith('jar:file:///x!/' + LINUX_RUNTIME.entry);
+});
+it('verifies, caches and repairs Linux bytes with the same integrity and permission checks as macOS', async () => {
+  const { root, host } = await setup(); host.os = 'Linux'; host.abi = 'x86_64-gcc3';
+  const linux = { ...LINUX_RUNTIME, size: manifest.size, sha256: manifest.sha256 };
+  const target = await ensureBundledRuntime(host, 'file:///extension/', root, linux);
+  expect((await stat(target)).mode & 0o777).toBe(0o700);
+  expect(await ensureBundledRuntime(host, 'file:///extension/', root, linux)).toBe(target);
+  expect(host.load).toHaveBeenCalledTimes(1);
+  await writeFile(target, 'bad');
+  await ensureBundledRuntime(host, 'file:///extension/', root, linux);
+  expect(await readFile(target, 'utf8')).toBe('abc');
+  expect(host.load).toHaveBeenCalledTimes(2);
+  await rm(target); await symlink('/bin/sh', target);
+  await expect(ensureBundledRuntime(host, 'file:///extension/', root, linux)).rejects.toThrow('Bundled runtime preparation failed');
+});
+it.each([['WINNT', 'x86_64-msvc'], ['Linux', 'aarch64-gcc3'], ['Linux', 'x86-gcc3'], ['Darwin', 'x86_64-gcc3']])('rejects unsupported %s/%s before creating files', async (os, abi) => {
+  const { root, host } = await setup(); host.os = os; host.abi = abi;
+  await expect(ensureBundledRuntime(host, 'file:///extension/', root)).rejects.toThrow('Unsupported runtime platform');
+  expect(await readdir(root)).toEqual([]);
+  expect(host.load).not.toHaveBeenCalled();
 });

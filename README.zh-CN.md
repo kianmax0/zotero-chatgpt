@@ -64,3 +64,5 @@ npm run package:dev
 ---
 
 独立社区项目，与 Zotero、OpenAI 无隶属或背书关系。
+
+当前开发包允许 Zotero 9.0.6 至 10.0.x，并随包提供 macOS Apple Silicon 与 Linux x86_64 的 Codex。Agent 通过独立官方流程登录，无需系统 Codex，也不导入其他客户端凭据。此支持范围不适用于上面的旧版 Release；实测范围见 [progress.md](docs/progress.md)。
