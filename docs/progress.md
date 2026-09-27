@@ -5,6 +5,19 @@
 
 产品要求见 [zotero-chatgpt-user-flow.md](zotero-chatgpt-user-flow.md)，架构见 [module-design.md](module-design.md)，命令与状态定义见 [development.md](development.md)。
 
+## 2026-09-28 v0.1.2 预发布版本整理
+
+用户要求突出 Zotero 10.0.x 兼容性并采用 v0.1.2。插件 manifest 版本同步从 0.1.1 改为 0.1.2，保持预发布状态；标题与发布说明按主要变化、兼容范围、安装/代理和验证情况整理。源码基于 `27af29d`，无运行逻辑修改。
+
+| 层级 | 状态 | 证据与范围 |
+| --- | --- | --- |
+| 构建与产物校验 | PASS | `npm run package:dev`、`npm run verify:artifacts`；88 files，208756431 bytes，SHA-256 `89193d3c3cf470cbcc051ebbbe13a820eeae5e4e605958935f0005a80f20df92`。 |
+| 版本与打包测试 | PASS | `npm run test:unit -- tests/build/release.test.ts tests/build/package.test.ts --maxWorkers=1`，2 files / 11 tests。 |
+| 新旧包逐文件比较 | PASS | 文件清单一致；只有 `manifest.json` 不同，其唯一变化是 version 从 0.1.1 升为 0.1.2。 |
+| 0.1.2 的宿主、真实登录、升级/回退、跨平台测试 | NOT RUN | 下节用户登录反馈及此前 59/59 宿主与完整单测仍属于原 0.1.1 候选，不改记为新 XPI 的实测。 |
+
+完成 diff 自审和 `git diff --check`，未做独立审查。按用户授权提交并发布预发布候选；公开状态以 GitHub Release 为准，旧包及验证记录保留。
+
 ## 2026-09-28 用户实测：Linux Agent 登录与使用
 
 用户在 Debian x86_64 / Zotero 10.0.3 上复测代理继承开发包，XPI SHA-256 为 `66b737337eac208ae05ecd1587eb95c9977d43e6eea33cf55daeb4d96104634a`。首次仍返回相同 403；只读排查确认已安装该包，但 Zotero 与 Agent 进程均没有代理环境变量。桌面手动代理设置没有自动转为进程环境，因此插件没有可继承的值。按现有桌面代理配置，通过带代理环境变量的启动脚本启动 Zotero 后，用户反馈“现在可以登陆了，并且我测试能正常工作了”。个人启动脚本只保留在本地交付目录，不纳入仓库。
