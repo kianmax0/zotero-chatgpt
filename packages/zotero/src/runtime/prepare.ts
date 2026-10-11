@@ -1,14 +1,12 @@
-import { PINNED_RUNTIME } from '../../../../runtime/manifest.ts';
+import { selectRuntime } from '../../../../runtime/manifest.ts';
 import { codexLaunchArgs } from '../../../core/src/codex/reader-policy.ts';
 import type { ProcessSpec } from '../../../contracts/src/runtime.ts';
-import { ensureBundledRuntime, type AssetHost, type RuntimeManifest } from './bundled.ts';
+import { ensureBundledRuntime, validateRuntime, type AssetHost, type RuntimeManifest } from './bundled.ts';
 import { GeckoStorage, privateDirectory } from './storage.ts';
 export interface RuntimeHost extends AssetHost {
   profileDir: string;
-  /** Resolves the already-installed Codex CLI and its existing CODEX_HOME. */
-  findSystemCodex?: () => Promise<{ executable: string; home: string } | null>;
-  /** Copies only the existing login token into the plugin-owned CODEX_HOME. */
-  copySystemCodexAuth?: (targetCodexHome: string) => Promise<void>;
+  /** Read on Agent preparation only; never enumerate or inherit the entire environment. */
+  getEnvironmentVariable?: (name: string) => string;
 }
 export interface PreparedRuntime { spec: ProcessSpec; codexVersion: string }
 /**
@@ -36,12 +34,15 @@ export function runtimePaths(host: RuntimeHost): RuntimePaths {
   };
 }
 /** Creates the private runtime environment and the bundled executable. Agent-only; never at bootstrap. */
-export async function prepareRuntime(host: RuntimeHost, rootURI: string, manifest: RuntimeManifest = PINNED_RUNTIME): Promise<PreparedRuntime> {
-  const macOS = host.os === 'Darwin' && /^(aarch64|arm64)-/u.test(host.abi);
-  const linux = host.os === 'Linux' && /^(x86_64|x64|amd64)-/u.test(host.abi);
-  if (!macOS && !linux) throw new Error('Unsupported runtime platform: macOS Apple Silicon or Linux x86_64 is required');
-  const systemCodex = linux ? await host.findSystemCodex?.() : null;
-  if (linux && !systemCodex) throw new Error('Codex CLI was not found; set CODEX_CLI_PATH or install codex in ~/.local/bin');
+export async function prepareRuntime(host: RuntimeHost, rootURI: string, manifest: RuntimeManifest = selectRuntime(host.os, host.abi)): Promise<PreparedRuntime> {
+  validateRuntime(host, manifest);
+  const proxies: Record<string, string> = {};
+  // Preserve both spellings and NO_PROXY semantics; the native HTTP client owns precedence.
+  // Values can contain proxy credentials, so never log or persist them.
+  for (const name of ['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY', 'http_proxy', 'https_proxy', 'all_proxy', 'no_proxy']) {
+    const value = host.getEnvironmentVariable?.(name);
+    if (value) proxies[name] = value;
+  }
   const paths = runtimePaths(host);
   const root = await privateDirectory(host, host.profileDir, 'zotero-chatgpt/v1');
   // The computed paths and the created ones must be the same directory tree.
@@ -55,15 +56,13 @@ export async function prepareRuntime(host: RuntimeHost, rootURI: string, manifes
   const data = await privateDirectory(host, home, 'data');
   const codexHome = account;
   const settings = new GeckoStorage(host, account);
-  // This account directory is exclusively ours. On Linux, only the existing login token is copied
-  // from the user's Codex home; all configuration and execution policy remain plugin-owned.
-  if (systemCodex) await host.copySystemCodexAuth?.(account);
+  // This account directory is exclusively ours. Only the official login flow writes credentials.
   await settings.writeAtomic('config.toml', new Uint8Array());
   // Empty execution environment catalog removes built-in file and command tools.
   await settings.writeAtomic('environments.toml', new TextEncoder().encode('include_local = false\n'));
-  const executable = systemCodex?.executable ?? await ensureBundledRuntime(host, rootURI, root, manifest);
+  const executable = await ensureBundledRuntime(host, rootURI, root, manifest);
   return {
-    codexVersion: systemCodex ? 'system' : manifest.codexVersion,
-    spec: { executable, args: codexLaunchArgs(), cwd, env: { HOME: systemCodex?.home ?? home, CODEX_HOME: codexHome, TMPDIR: temporary + '/', XDG_CONFIG_HOME: config, XDG_CACHE_HOME: cache, XDG_DATA_HOME: data, LANG: 'en_US.UTF-8', LC_ALL: 'en_US.UTF-8', CODEX_EXEC_SERVER_URL: 'none', CODEX_INTERNAL_APP_SERVER_REMOTE_CONTROL_DISABLED: '1' } },
+    codexVersion: manifest.codexVersion,
+    spec: { executable, args: codexLaunchArgs(), cwd, env: { ...proxies, HOME: home, CODEX_HOME: codexHome, TMPDIR: temporary + '/', XDG_CONFIG_HOME: config, XDG_CACHE_HOME: cache, XDG_DATA_HOME: data, LANG: 'en_US.UTF-8', LC_ALL: 'en_US.UTF-8', CODEX_EXEC_SERVER_URL: 'none', CODEX_INTERNAL_APP_SERVER_REMOTE_CONTROL_DISABLED: '1' } },
   };
 }

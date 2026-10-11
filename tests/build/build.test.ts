@@ -70,7 +70,7 @@ describe("development build", () => {
       applications: {
         zotero: {
           id: "{90909501-7b5b-4985-9f55-566e9890746c}",
-          strict_max_version: "9.0.*",
+          strict_max_version: "10.0.*",
           strict_min_version: "9.0.6",
         },
       },

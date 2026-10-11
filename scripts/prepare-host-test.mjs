@@ -239,7 +239,7 @@ if (installDriver) {
     manifest_version: 2,
     name: 'ZCHATGPT isolated host test driver',
     version: driverVersion,
-    applications: { zotero: { id: 'zchatgpt-host-test@local', update_url: 'https://zotero-chatgpt-dev.invalid/driver-updates.json', strict_min_version: '9.0.6', strict_max_version: '9.0.*' } },
+    applications: { zotero: { id: 'zchatgpt-host-test@local', update_url: 'https://zotero-chatgpt-dev.invalid/driver-updates.json', strict_min_version: subjectManifest.applications.zotero.strict_min_version, strict_max_version: subjectManifest.applications.zotero.strict_max_version } },
   };
   const webAcceptanceStartup = webAcceptanceEnabled ? `
     const resource = Services.io.getProtocolHandler("resource").QueryInterface(Ci.nsIResProtocolHandler);

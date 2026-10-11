@@ -137,6 +137,8 @@ Chat 只保存 canonical `https://chatgpt.com/c/<id>` 的本地绑定。查询�
 
 运行时隔离分两种情况验证：冷启动 Chat 应维持零插件 Codex 进程、零模型请求；已有明确启动的 Agent 工作时，Chat 操作不得增加可归因于 Chat 的 Codex 连接、轮次或任务。不能把已有 Agent 后台进程的存在误判为 Chat 串线，也不能以“反正进程已启动”为理由允许 Chat 调用它。
 
+当前开发包按 Gecko OS/ABI 选择固定 Codex 0.156.1：Darwin arm64 或 Linux x86_64（静态 musl）。两个官方资产一起打包，归档与可执行文件分别校验 SHA-256；不匹配平台在写 profile 之前拒绝。两平台都只使用私有 HOME/CODEX_HOME，不搜索系统 CLI、不复制其他客户端认证。Agent 准备时只额外读取 Zotero 父进程的 HTTP_PROXY/HTTPS_PROXY/ALL_PROXY/NO_PROXY 及各自小写形式；保持值和大小写，不记录或持久化，仍用 environmentAppend:false 禁止继承其他环境。旧 Linux 分支导入过的 profile 文件不会被本次准备删除；新增登录由用户完成官方流程。Chat 与 Agent 登录仍分开。
+
 ### 5.2 请求持久化和权限
 
 Agent 发送或排队时冻结模式、问题、PDF、选区/引用、skill、设置、组织选择和请求 ID。用户消息与 accepted 记录先原子持久化，随后才外发。排队期间的 UI 变化不改变冻结输入。

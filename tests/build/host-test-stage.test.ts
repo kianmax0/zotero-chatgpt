@@ -32,7 +32,7 @@ async function prepareScriptSandbox(): Promise<{ root: string; script: string; x
     cp(path.join(repositoryRoot, 'tests/host/embed-driver.js'), path.join(root, 'tests/host/embed-driver.js')),
     cp(path.join(repositoryRoot, 'tests/host/web-acceptance-actor.mjs'), path.join(root, 'tests/host/web-acceptance-actor.mjs')),
     cp(path.join(repositoryRoot, 'runtime/manifest.ts'), path.join(root, 'runtime/manifest.ts')),
-    writeFile(path.join(root, 'packages/zotero/manifest.json'), JSON.stringify({ version: '0.0.0-test' })),
+    writeFile(path.join(root, 'packages/zotero/manifest.json'), JSON.stringify({ version: '0.0.0-test', applications: { zotero: { strict_min_version: '9.0.6', strict_max_version: '10.0.*' } } })),
     writeFile(path.join(root, 'subject.xpi'), 'synthetic test artifact'),
   ]);
   return { root, script: path.join(root, 'scripts/prepare-host-test.mjs'), xpi: path.join(root, 'subject.xpi') };

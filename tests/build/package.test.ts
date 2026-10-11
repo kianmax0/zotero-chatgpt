@@ -96,6 +96,7 @@ async function createPackagingFixture(parentDirectory: string): Promise<{
     "content/actors/chatgpt-dom.mjs",
     "content/zchatgpt.js",
     "content/runtime/codex-aarch64-apple-darwin",
+    "content/runtime/codex-x86_64-unknown-linux-musl",
     "content/runtime/manifest.json",
     "content/runtime/licenses/LICENSE",
     "content/runtime/licenses/NOTICE",

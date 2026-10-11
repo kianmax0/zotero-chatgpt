@@ -261,7 +261,7 @@ describe('path-safe extract and local updates.json', () => {
       version: '0.3.0a1',
       update_link: 'https://zotero-chatgpt-dev.invalid/zotero-chatgpt-0.3.0a1-dev.xpi',
       update_hash: `sha256:${digest}`,
-      applications: { zotero: { strict_min_version: '9.0.6', strict_max_version: '9.0.*' } },
+      applications: { zotero: { strict_min_version: '9.0.6', strict_max_version: '10.0.*' } },
     });
     expect(update?.update_link).not.toMatch(/github\.com/i);
     expect(result.updateLink).toBe(update?.update_link);
@@ -279,8 +279,9 @@ describe('path-safe extract and local updates.json', () => {
     expect(info.addonId).toBe(subjectID);
     expect(info.version).toBe('0.3.0a1');
     expect(info.sha256).toBe(digest);
-    expect(info.platform).toBe('darwin');
-    expect(info.architecture).toBe('arm64');
+    expect(info.platform).toBe('multi');
+    expect(info.runtimes).toEqual([expect.objectContaining({ platform: 'darwin', architecture: 'arm64' }), expect.objectContaining({ platform: 'linux', architecture: 'x64' })]);
+    expect(info.architecture).toBe('multi');
     expect(info.githubRelease).toBeNull();
     expect(info.updateChannel).toBe('none');
     expect(info.source).toBe('local-xpi');

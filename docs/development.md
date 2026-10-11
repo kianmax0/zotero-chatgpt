@@ -31,7 +31,7 @@ npm run package:dev
 npm run verify:artifacts
 ```
 
-`runtime-prepare.mjs` 按 manifest 锁定官方 Codex darwin-arm64 归档和 SHA-256，准备到忽略目录；当前目标 pin 为 0.156.1。实施时先核对实际 manifest，不能因文档旧 pin 擅自升级或降级运行时。该脚本不替换系统 CLI，不读取/迁移其它客户端认证。缺少真实运行资产时打包失败，不能用 fixture 冒充。
+`runtime-prepare.mjs` 按 manifest 锁定官方 Codex darwin-arm64 与 linux-x64-musl 归档和 SHA-256，准备到忽略目录；当前目标 pin 为 0.156.1。实施时先核对实际 manifest，不能因文档旧 pin 擅自升级或降级运行时。该脚本不替换系统 CLI，不读取/迁移其它客户端认证。当前开发包允许 Zotero 9.0.6–10.0.x；本轮 Linux 宿主版本为 10.0.3，其他平台实测状态见 progress。缺少真实运行资产时打包失败，不能用 fixture 冒充。
 
 | 命令 | 能证明什么 | 不能证明什么 |
 | --- | --- | --- |
@@ -193,3 +193,9 @@ npm run install:dev -- rollback --profile "<profile>"
 公开 push、GitHub Release、签名、更新频道、付费服务、真实文献库写入和日常 profile 安装均需要对应授权。公开发行还需干净 checkout 重建、最终 XPI 专用宿主复验、无 Node 环境、升级/回退和支持平台证据。
 
 完成实现后审查实际 diff，修复发现的问题并重跑相关检查。可用独立审查时记录其证据；只能自审时明确为自审。文档审查、代码审查和真实宿主验证不可互相替代。
+
+### Agent 代理环境
+
+Agent 继承启动 Zotero 的进程环境中的 `HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`、`NO_PROXY` 及其小写形式；不会读取桌面系统代理、浏览器代理插件或 shell 配置文件。值原样传递，缺失/空值不传递；大小写冲突由运行程序的 HTTP 客户端处理。`HOME`/`CODEX_HOME`、执行策略及其他环境隔离不变，不记录含代理认证的 URL。
+
+安装代理继承测试包后应完全退出并重新启动 Zotero。若代理变量只在某个终端中设置，需从该终端启动 Zotero，使 Zotero 本身获得变量；更新终端的变量不会改变已运行的 Zotero 进程。该改动只保证变量传递，不保证网络出口、地区支持或登录成功。

@@ -277,9 +277,9 @@ describe('runtime handshake and policy', () => {
     await expect(client.refreshAccount()).rejects.toThrow('version');
     expect(s.p.terminated).toBe(true);
   });
-  it('rejects the previous pinned runtime version before connecting', async () => {
+  it.each(['0.154.0', 'system'])('rejects an unpinned runtime version %s before connecting', async codexVersion => {
     const s = server();
-    await expect(createReaderClient(s.p, new MemoryStorage(), { codexVersion: '0.154.0', cwd: '/isolated', uuid })).rejects.toThrow('Unsupported runtime version');
+    await expect(createReaderClient(s.p, new MemoryStorage(), { codexVersion, cwd: '/isolated', uuid })).rejects.toThrow('Unsupported runtime version');
     expect(methods(s.p)).toEqual([]);
   });
   it('latches overflow once and stops the transport', async () => {

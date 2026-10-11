@@ -15,3 +15,29 @@ export const PINNED_RUNTIME = {
   },
   licenses: ['LICENSE', 'NOTICE', 'RATATUI-LICENSE', 'WEZTERM-LICENSE'],
 } as const;
+
+/** Static musl executable: no system Node, CLI or glibc version dependency. */
+export const LINUX_RUNTIME = {
+  codexVersion: PINNED_RUNTIME.codexVersion,
+  platform: 'linux',
+  architecture: 'x64',
+  entry: 'content/runtime/codex-x86_64-unknown-linux-musl',
+  size: 284479848,
+  sha256: '0b2e9301d6100dddda3b9d5c80ebaeaa3a2f1962388f2f36f6b96a9f08b1f33f',
+  archive: {
+    url: 'https://github.com/openai/codex/releases/download/rust-v0.156.1/codex-x86_64-unknown-linux-musl.tar.gz',
+    filename: 'codex-x86_64-unknown-linux-musl.tar.gz',
+    entry: 'codex-x86_64-unknown-linux-musl',
+    size: 107380357,
+    sha256: 'aff46539a83aff86e3c62c592bce2c50d95391f9df289afaf03a50c01d14533d',
+  },
+  licenses: PINNED_RUNTIME.licenses,
+} as const;
+export const PINNED_RUNTIMES = [PINNED_RUNTIME, LINUX_RUNTIME] as const;
+
+/** Gecko platform names; unsupported combinations fail before any profile writes. */
+export function selectRuntime(os: string, abi: string): typeof PINNED_RUNTIMES[number] {
+  if (os === 'Darwin' && /^(aarch64|arm64)-/u.test(abi)) return PINNED_RUNTIME;
+  if (os === 'Linux' && /^(x86_64|x64|amd64)-/u.test(abi)) return LINUX_RUNTIME;
+  throw new Error('Unsupported runtime platform: macOS Apple Silicon or Linux x86_64 is required');
+}

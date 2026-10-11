@@ -1,15 +1,18 @@
-import { PINNED_RUNTIME } from '../../../../runtime/manifest.ts';
+import { selectRuntime } from '../../../../runtime/manifest.ts';
 import { checkPath, privateDirectory, type FileHost } from './storage.ts';
 export interface RuntimeManifest { codexVersion: string; platform: string; architecture: string; entry: string; size: number; sha256: string }
 export interface AssetHost extends FileHost { os: string; abi: string; load(url: string): Promise<Uint8Array> }
-export async function ensureBundledRuntime(host: AssetHost, rootURI: string, privateRoot: string, manifest: RuntimeManifest = PINNED_RUNTIME): Promise<string> {
-  if (host.os !== 'Darwin' || !/^(aarch64|arm64)-/u.test(host.abi)) throw new Error('Unsupported runtime platform: macOS Apple Silicon is required');
-  if (manifest.codexVersion !== PINNED_RUNTIME.codexVersion || manifest.platform !== 'darwin' || manifest.architecture !== 'arm64' || manifest.entry !== PINNED_RUNTIME.entry || !Number.isSafeInteger(manifest.size) || manifest.size <= 0 || !/^[a-f0-9]{64}$/u.test(manifest.sha256)) throw new Error('Invalid bundled runtime manifest');
+export function validateRuntime(host: AssetHost, manifest: RuntimeManifest): void {
+  const pinned = selectRuntime(host.os, host.abi);
+  if (manifest.codexVersion !== pinned.codexVersion || manifest.platform !== pinned.platform || manifest.architecture !== pinned.architecture || manifest.entry !== pinned.entry || !Number.isSafeInteger(manifest.size) || manifest.size <= 0 || !/^[a-f0-9]{64}$/u.test(manifest.sha256)) throw new Error('Invalid bundled runtime manifest');
+}
+export async function ensureBundledRuntime(host: AssetHost, rootURI: string, privateRoot: string, manifest: RuntimeManifest = selectRuntime(host.os, host.abi)): Promise<string> {
+  validateRuntime(host, manifest);
   // rootURI comes only from Zotero's installed add-on, never from UI or storage.
   if (!rootURI.endsWith('/') || !/^(jar:file:|file:)/u.test(rootURI)) throw new Error('Invalid extension resource root');
   let staging: string | null = null;
   try {
-    const directory = await privateDirectory(host, privateRoot, `runtime/${manifest.codexVersion}-darwin-arm64/${manifest.sha256}`);
+    const directory = await privateDirectory(host, privateRoot, `runtime/${manifest.codexVersion}-${manifest.platform}-${manifest.architecture}/${manifest.sha256}`);
     const target = host.join(directory, 'codex');
     const verify = async (file: string) => {
       if (!await checkPath(host, file, 'regular')) throw new Error('Missing executable');
