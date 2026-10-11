@@ -1,6 +1,6 @@
 # Zotero ChatGPT
 
-[English](README.md) · [下载 v0.1.1](https://github.com/kianmax0/zotero-chatgpt/releases/tag/v0.1.1)
+[English](README.md) · [下载 v0.1.2](https://github.com/kianmax0/zotero-chatgpt/releases/tag/v0.1.2)
 
 **在 Zotero 里用 ChatGPT 读论文，用 Codex Agent 完成受控操作。**
 
@@ -11,7 +11,7 @@
 
 默认进入 Chat，且 Chat 不发起任何 Codex 请求。Agent 的写入只作用于本次指定的论文或集合：明确要求且验证通过的高亮自动写入，其余改动先预览并等待批准。Figure 与依赖模型的文献库链路在当前 `main` 上仍属实验功能，见[进度记录](docs/progress.md)。
 
-**当前开发状态（2026-09-27）：** 插件内的官网页面可见，但最新测试的开发包未能识别官网现有输入框。带自动文献信息的发送和选区提交因此受阻。下方演示来自较早的开发包；[真实宿主结果](docs/progress.md)记录了这一限制。已发布的 v0.1.1 是另一份产物。
+**上次记录的开发状态（2026-09-27）：** 插件内的官网页面可见，但最新测试的开发包未能识别官网现有输入框。带自动文献信息的发送和选区提交因此受阻。下方演示来自较早的开发包；[真实宿主结果](docs/progress.md)记录了这一限制。这份历史开发测试结果不代表对 v0.1.2 的重新验证。
 
 ## 演示
 
@@ -39,19 +39,19 @@ Silver 等人（2016）的 *[Mastering the game of Go with deep neural networks 
 
 ## 安装
 
-从 [v0.1.1 Release](https://github.com/kianmax0/zotero-chatgpt/releases/tag/v0.1.1) 下载 `.xpi`，拖入 **工具 → 插件** 窗口。要求 Zotero 9.0.6。macOS Apple Silicon 上 Agent 使用随包运行时；Linux x86_64 上需要已安装的 Codex CLI。
+从 [v0.1.2 正式版](https://github.com/kianmax0/zotero-chatgpt/releases/tag/v0.1.2) 下载 `.xpi`，拖入 **工具 → 插件** 窗口后重启 Zotero。支持 Zotero **9.0.6–10.0.x**。macOS Apple Silicon 与 Linux x86_64 的 Agent 均使用随包 Codex，无需另外安装 Codex CLI。如需代理，应在带有相应代理环境变量的环境中启动 Zotero；仅设置桌面代理不一定会传入这些变量。
 
-若要在 macOS Apple Silicon 上构建当前 `main` 版本（Node 24、npm 11）：
+若要从源码构建 v0.1.2（Node 24、npm 11）：
 
 ```sh
-git clone https://github.com/kianmax0/zotero-chatgpt.git
+git clone --branch v0.1.2 https://github.com/kianmax0/zotero-chatgpt.git
 cd zotero-chatgpt
 npm ci
 node scripts/runtime-prepare.mjs
 npm run package:dev
 ```
 
-用同样方式安装 `dist/zotero-chatgpt-0.1.1-dev.xpi`；它与 v0.1.1 版本号相同，但内容更新。
+用同样方式安装 `dist/zotero-chatgpt-0.1.2-dev.xpi`。实测范围与已知限制见[发布说明](https://github.com/kianmax0/zotero-chatgpt/releases/tag/v0.1.2)。
 
 ## 开始使用
 

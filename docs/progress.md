@@ -1,9 +1,15 @@
 # zotero-chatgpt：进度与证据索引
 
-> 文档类型：证据和缺口，不是产品规格。更新日期：2026-09-27。
-> 首节记录本轮仓库收尾与最终开发包，其后保留 Chat 网页修复、用户 UI 反馈、重构验收及有引用价值的修复、测试、发行与失败历史；历史结果不自动继承到当前候选。已移除过期的“当前候选”快照和重复状态矩阵。状态只用 PASS / FAIL / BLOCKED / NOT RUN。
+> 文档类型：证据和缺口，不是产品规格。更新日期：2026-10-11。
+> 首节记录 v0.1.2 正式发布状态，其后保留 Chat 网页修复、用户 UI 反馈、重构验收及有引用价值的修复、测试、发行与失败历史；历史结果不自动继承到当前候选。已移除过期的“当前候选”快照和重复状态矩阵。状态只用 PASS / FAIL / BLOCKED / NOT RUN。
 
 产品要求见 [zotero-chatgpt-user-flow.md](zotero-chatgpt-user-flow.md)，架构见 [module-design.md](module-design.md)，命令与状态定义见 [development.md](development.md)。
+
+## 2026-10-11 v0.1.2 转为正式版
+
+按用户要求，将 [v0.1.2](https://github.com/kianmax0/zotero-chatgpt/releases/tag/v0.1.2) 从预发布提升为正式版并设为 Latest；更新中英文 README 的下载、Zotero 9.0.6–10.0.x 兼容范围、随包 Linux Agent 与源码构建说明。本轮仅修改文档与 Release 元数据，未合并运行逻辑到 `main`。
+
+安装包、标签与源码提交 `7cb490d24174f6bb3830bb9fced182413a459179` 保持不变；XPI SHA-256 为 `89193d3c3cf470cbcc051ebbbe13a820eeae5e4e605958935f0005a80f20df92`。既有验证与未测范围见[该版本记录](https://github.com/kianmax0/zotero-chatgpt/blob/v0.1.2/docs/progress.md)及 Release 说明，未因发布状态变化扩大验收结论。本轮自审文档与链接，`git diff --check` PASS；构建、宿主与真实服务复测 NOT RUN，保留原包。
 
 ## 2026-09-27 仓库收尾与当前开发包
 

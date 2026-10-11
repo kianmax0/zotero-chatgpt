@@ -1,6 +1,6 @@
 # Zotero ChatGPT
 
-[简体中文](README.zh-CN.md) · [Download v0.1.1](https://github.com/kianmax0/zotero-chatgpt/releases/tag/v0.1.1)
+[简体中文](README.zh-CN.md) · [Download v0.1.2](https://github.com/kianmax0/zotero-chatgpt/releases/tag/v0.1.2)
 
 **Read papers with ChatGPT. Put a Codex Agent to work in Zotero.**
 
@@ -11,7 +11,7 @@
 
 Chat opens by default and never starts a Codex request. Agent writes stay inside the requested paper or collection: verified highlights from an explicit request apply automatically, everything else is previewed for approval. Figure and model-backed library flows on `main` are experimental ([progress](docs/progress.md)).
 
-**Current development status (September 27, 2026):** The embedded official page is visible, but its current editor is not recognized by the guarded bridge. Automatic paper context and selected-passage submission are blocked in the latest tested development build. The demos below came from an earlier build; see [the exact host result](docs/progress.md). The published v0.1.1 asset is a separate build.
+**Last recorded development status (September 27, 2026):** The embedded official page is visible, but its current editor is not recognized by the guarded bridge. Automatic paper context and selected-passage submission are blocked in the latest tested development build. The demos below came from an earlier build; see [the exact host result](docs/progress.md). This dated development result is not a new verification of the v0.1.2 release.
 
 ## Demo
 
@@ -39,19 +39,19 @@ Silver et al. (2016), *[Mastering the game of Go with deep neural networks and t
 
 ## Install
 
-Download the `.xpi` from the [v0.1.1 release](https://github.com/kianmax0/zotero-chatgpt/releases/tag/v0.1.1) and drag it into **Tools → Plugins**. Requires Zotero 9.0.6. Agent uses the bundled runtime on macOS Apple Silicon; on Linux x86_64 it needs an installed Codex CLI.
+Download the `.xpi` from the [v0.1.2 stable release](https://github.com/kianmax0/zotero-chatgpt/releases/tag/v0.1.2) and drag it into **Tools → Plugins**, then restart Zotero. Supports Zotero **9.0.6–10.0.x**. Agent bundles Codex for macOS Apple Silicon and Linux x86_64; no separate Codex CLI installation is required. If a proxy is needed, launch Zotero with the appropriate proxy environment variables; desktop proxy settings alone may not supply them.
 
-To build the current `main` version instead (Node 24, npm 11):
+To build the v0.1.2 release from source (Node 24, npm 11):
 
 ```sh
-git clone https://github.com/kianmax0/zotero-chatgpt.git
+git clone --branch v0.1.2 https://github.com/kianmax0/zotero-chatgpt.git
 cd zotero-chatgpt
 npm ci
 node scripts/runtime-prepare.mjs
 npm run package:dev
 ```
 
-Install `dist/zotero-chatgpt-0.1.1-dev.xpi` the same way; it shares the v0.1.1 version label but is a newer build.
+Install `dist/zotero-chatgpt-0.1.2-dev.xpi` the same way. See the [release notes](https://github.com/kianmax0/zotero-chatgpt/releases/tag/v0.1.2) for the tested scope and known limitations.
 
 ## Start using it
 
